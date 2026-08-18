@@ -1,0 +1,230 @@
+--!nonstrict
+-- e  ·  code generator
+--
+-- Walks the document and writes Luau.  Two things make the output feel
+-- hand-written rather than machine-stamped:
+--
+--   * services are hoisted -- blocks declare what they need ("Players",
+--     "TweenService") and one tidy preamble appears at the top, skipping any
+--     service you already declared yourself;
+--   * `if` blocks nested in an `otherwise` slot collapse back into `elseif`,
+--     so a five-way branch does not march off the right edge of the screen.
+--
+--   local code, meta = e.generate(doc)
+--   meta.blockOfLine[12] -- which block wrote line 12
+
+local c = require(script.Parent.c)
+local d = require(script.Parent.d)
+
+local e = {}
+
+local INDENT = "\t"
+
+local Writer = {}
+Writer.__index = Writer
+
+local function newWriter()
+	return setmetatable({
+		lines = {},
+		owners = {},
+		depth = 0,
+		needs = {},
+		declared = {},
+	}, Writer)
+end
+
+function Writer:line(text, owner)
+	local body = text or ""
+	if body == "" then
+		self.lines[#self.lines + 1] = ""
+	else
+		self.lines[#self.lines + 1] = string.rep(INDENT, self.depth) .. body
+	end
+	self.owners[#self.lines] = owner
+	-- Notice services the author declared by hand so the preamble stays quiet.
+	local name = string.match(body, '^local%s+([%a_][%w_]*)%s*=%s*game:GetService')
+	if name then self.declared[name] = true end
+	return #self.lines
+end
+
+-- Template lines may start with tabs to nest inside their own block.
+function Writer:tpl(text, owner)
+	local extra = 0
+	local body = text
+	while string.sub(body, 1, 1) == INDENT do
+		extra = extra + 1
+		body = string.sub(body, 2)
+	end
+	self.depth = self.depth + extra
+	local at = self:line(body, owner)
+	self.depth = self.depth - extra
+	return at
+end
+
+function Writer:push(levels) self.depth = self.depth + (levels or 1) end
+function Writer:pop(levels) self.depth = math.max(0, self.depth - (levels or 1)) end
+
+--=============================================================================
+
+local emitStack
+
+local function fillLine(def, block, template)
+	return c.fill(c.parseTemplate(template), def, block)
+end
+
+-- `if a then ... otherwise (single if) ...` -> `if a then ... elseif b then ...`
+-- Writes the chain without its closing `end`; the caller owns that, so the
+-- recursion cannot lose it.
+local function emitIfChain(w, doc, block, keyword)
+	local def = c.get(block.k)
+	w:tpl(string.gsub(fillLine(def, block, def.codeLines[1]), "^if", keyword, 1), block.id)
+	w:push()
+	emitStack(w, doc, d.children(doc, block, "body"))
+	w:pop()
+
+	local els = d.children(doc, block, "els")
+	if #els == 1 and (els[1].k == "if" or els[1].k == "ifelse") then
+		emitIfChain(w, doc, els[1], "elseif")
+		return
+	end
+	if #els > 0 then
+		w:line("else", block.id)
+		w:push()
+		emitStack(w, doc, els)
+		w:pop()
+	end
+end
+
+local function emitBlock(w, doc, block)
+	local def = c.get(block.k)
+	if not def then
+		w:line("-- [DIErrorX] unknown block '" .. tostring(block.k) .. "'", block.id)
+		return
+	end
+
+	for _, service in ipairs(def.needs or {}) do
+		w.needs[service] = true
+	end
+
+	if def.raw then
+		local source = c.fieldValue(def, block, "code")
+		if source == "" then return end
+		for piece in string.gmatch(source .. "\n", "([^\n]*)\n") do
+			w:line(piece, block.id)
+		end
+		return
+	end
+
+	if def.elseifCollapse then
+		emitIfChain(w, doc, block, "if")
+		w:line("end", block.id)
+		return
+	end
+
+	for _, template in ipairs(def.codeLines) do
+		w:tpl(fillLine(def, block, template), block.id)
+	end
+
+	for _, slot in ipairs(def.slots) do
+		if slot.codePre then
+			local at = slot.codeIndent or (def.bodyIndent - 1)
+			w:push(at)
+			w:line(fillLine(def, block, slot.codePre), block.id)
+			w:pop(at)
+		end
+		w:push(def.bodyIndent)
+		emitStack(w, doc, d.children(doc, block, slot.key))
+		w:pop(def.bodyIndent)
+	end
+
+	for _, template in ipairs(def.codeTailLines or {}) do
+		w:tpl(fillLine(def, block, template), block.id)
+	end
+end
+
+function emitStack(w, doc, blocks)
+	for _, block in ipairs(blocks) do
+		emitBlock(w, doc, block)
+	end
+end
+
+--=============================================================================
+
+local SERVICE_ORDER = {
+	Players = 1, RunService = 2, ReplicatedStorage = 3, ServerStorage = 4,
+	TweenService = 5, UserInputService = 6, CollectionService = 7, Debris = 8,
+}
+
+-- Generates the script for a document.
+-- opts.header = false turns off the two-line banner.
+function e.generate(doc, opts)
+	opts = opts or {}
+	local w = newWriter()
+
+	for index, stack in ipairs(d.sortedStacks(doc)) do
+		if index > 1 then w:line("") end
+		emitStack(w, doc, d.stackBlocks(doc, stack))
+	end
+
+	local preamble = {}
+	local pending = {}
+	for service in pairs(w.needs) do
+		if not w.declared[service] then pending[#pending + 1] = service end
+	end
+	table.sort(pending, function(a, b)
+		local ra, rb = SERVICE_ORDER[a] or 50, SERVICE_ORDER[b] or 50
+		if ra ~= rb then return ra < rb end
+		return a < b
+	end)
+	for _, service in ipairs(pending) do
+		preamble[#preamble + 1] =
+			string.format('local %s = game:GetService("%s")', service, service)
+	end
+
+	local head = {}
+	if opts.header ~= false then
+		head[#head + 1] = "-- " .. (doc.name or "Untitled")
+		head[#head + 1] = "-- built with DIErrorX -- edits here do not travel back to the blocks"
+		head[#head + 1] = ""
+	end
+	if #preamble > 0 then
+		for _, line in ipairs(preamble) do head[#head + 1] = line end
+		head[#head + 1] = ""
+	end
+
+	local out = {}
+	local blockOfLine = {}
+	local lineOfBlock = {}
+	for _, line in ipairs(head) do out[#out + 1] = line end
+	local offset = #out
+	for index, line in ipairs(w.lines) do
+		out[#out + 1] = line
+		local owner = w.owners[index]
+		if owner then
+			blockOfLine[index + offset] = owner
+			if not lineOfBlock[owner] then lineOfBlock[owner] = index + offset end
+		end
+	end
+
+	while #out > 0 and out[#out] == "" do out[#out] = nil end
+	if #out == 0 then
+		out[1] = "-- Nothing on the canvas yet."
+		out[2] = "-- Drag a block out of the palette on the left to start."
+	end
+
+	return table.concat(out, "\n"), {
+		blockOfLine = blockOfLine,
+		lineOfBlock = lineOfBlock,
+		services = pending,
+		lineCount = #out,
+	}
+end
+
+-- Just the code for one block and its children, used by tutorials and tooltips.
+function e.snippet(doc, block)
+	local w = newWriter()
+	emitBlock(w, doc, block)
+	return table.concat(w.lines, "\n")
+end
+
+return e
