@@ -205,17 +205,31 @@ function b.hover(gui, onEnter, onLeave)
 end
 
 -- Wires a button's fill to hover and press states derived from a base token.
+-- Calling it again on the same button retunes it rather than stacking up a
+-- second set of handlers.
+local stateHandlers = setmetatable({}, { __mode = "k" })
+
 function b.states(button, baseToken, hoverAmount)
-	local function paint(mix)
-		local base = type(baseToken) == "function" and baseToken() or a.c[baseToken]
-		button.BackgroundColor3 = base:Lerp(a.c.accent, mix)
+	local state = stateHandlers[button]
+	if state then
+		state.token = baseToken
+		state.amount = hoverAmount or 0.12
+		state.paint(0)
+		return button
 	end
-	local repaint = a.onChange(function() paint(0) end)
-	button.Destroying:Connect(repaint)
-	b.hover(button, function() paint(hoverAmount or 0.12) end, function() paint(0) end)
-	button.MouseButton1Down:Connect(function() paint((hoverAmount or 0.12) + 0.1) end)
-	button.MouseButton1Up:Connect(function() paint(hoverAmount or 0.12) end)
-	paint(0)
+
+	state = { token = baseToken, amount = hoverAmount or 0.12 }
+	function state.paint(mix)
+		local base = type(state.token) == "function" and state.token() or a.c[state.token]
+		if base then button.BackgroundColor3 = base:Lerp(a.c.accent, mix) end
+	end
+	stateHandlers[button] = state
+
+	a.onChange(function() state.paint(0) end)
+	b.hover(button, function() state.paint(state.amount) end, function() state.paint(0) end)
+	button.MouseButton1Down:Connect(function() state.paint(state.amount + 0.1) end)
+	button.MouseButton1Up:Connect(function() state.paint(state.amount) end)
+	state.paint(0)
 	return button
 end
 
@@ -223,7 +237,9 @@ function b.button(props)
 	props = props or {}
 	local label = props.label
 	local onClick = props.onClick
-	props.label, props.onClick = nil, nil
+	local labelColor = props.labelColor
+	local hoverAmount = props.hoverAmount
+	props.label, props.onClick, props.labelColor, props.hoverAmount = nil, nil, nil, nil
 	props.Size = props.Size or UDim2.new(0, 90, 0, 24)
 	props.bg = props.bg or "raised"
 	props.radius = props.radius ~= nil and props.radius or a.metric.radius
@@ -232,14 +248,14 @@ function b.button(props)
 	local text = b.text({
 		Text = label or "",
 		Size = UDim2.new(1, 0, 1, 0),
-		fg = props.labelColor or "text",
+		fg = labelColor or "text",
 		Font = a.font.uiMedium,
 		TextSize = a.metric.uiText,
 		TextXAlignment = Enum.TextXAlignment.Center,
 		Parent = button,
 	})
 	button:SetAttribute("label", label or "")
-	b.states(button, props.bg, props.hoverAmount)
+	b.states(button, props.bg, hoverAmount)
 	if onClick then
 		button.MouseButton1Click:Connect(function()
 			if button:GetAttribute("disabled") then return end
@@ -280,6 +296,23 @@ function b.chip(letter, color, size)
 		TextXAlignment = Enum.TextXAlignment.Center,
 		Parent = frame,
 	})
+	return frame
+end
+
+-- A chevron drawn from two hairlines, so it never depends on a font having
+-- the right glyph.
+function b.chevron(size, token)
+	local frame = b.new("Frame", { Size = UDim2.fromOffset(size + 2, size) })
+	for _, side in ipairs({ -1, 1 }) do
+		b.new("Frame", {
+			Size = UDim2.fromOffset(size * 0.8, 1),
+			Position = UDim2.fromOffset(size * 0.5 + side * size * 0.28, size * 0.5),
+			AnchorPoint = Vector2.new(0.5, 0.5),
+			Rotation = side * 40,
+			bg = token or "text3",
+			Parent = frame,
+		})
+	end
 	return frame
 end
 

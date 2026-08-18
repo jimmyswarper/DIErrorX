@@ -113,18 +113,22 @@ function d.stackBlocks(doc, stack)
 	return out
 end
 
-local function dropEmptyStacks(doc)
-	local kept = {}
-	for _, stack in ipairs(doc.stacks) do
-		if #stack.ids > 0 then kept[#kept + 1] = stack end
+-- Only ever prunes the stack a block just left.  Sweeping every empty stack
+-- would also take the fresh one a block is on its way into.
+local function dropIfEmpty(doc, owner)
+	if not owner or not owner.ids or #owner.ids > 0 then return end
+	for index, stack in ipairs(doc.stacks) do
+		if stack == owner then
+			table.remove(doc.stacks, index)
+			return
+		end
 	end
-	doc.stacks = kept
 end
 
 -- Removes a block from its list without deleting it.  Returns the siblings that
 -- followed it, which the caller may want to carry along.
 local function unlink(doc, block, takeFollowing)
-	local list = d.listOf(doc, block)
+	local list, owner = d.listOf(doc, block)
 	local following = {}
 	if list then
 		local at = indexOf(list, block.id)
@@ -145,7 +149,7 @@ local function unlink(doc, block, takeFollowing)
 		end
 	end
 	block.p, block.ps, block.st = nil, nil, nil
-	dropEmptyStacks(doc)
+	dropIfEmpty(doc, owner)
 	return following
 end
 
@@ -171,10 +175,15 @@ local function place(doc, block, list, index, ownerFields)
 	return index
 end
 
--- Inserts `block` (and optionally a run of blocks after it) into a slot.
+-- Inserts `block` into a slot.  When `following` is omitted the blocks below it
+-- come along, the way dragging works; pass an empty table to move it alone.
 function d.attachToSlot(doc, block, parent, slotKey, index, following)
 	if not d.canDropIn(doc, block, parent) then return false end
-	following = following or unlink(doc, block, true)
+	if following then
+		unlink(doc, block, false)
+	else
+		following = unlink(doc, block, true)
+	end
 	local list = parent.s[slotKey]
 	if not list then
 		list = {}
@@ -188,7 +197,11 @@ function d.attachToSlot(doc, block, parent, slotKey, index, following)
 end
 
 function d.attachToStack(doc, block, stack, index, following)
-	following = following or unlink(doc, block, true)
+	if following then
+		unlink(doc, block, false)
+	else
+		following = unlink(doc, block, true)
+	end
 	local at = place(doc, block, stack.ids, index, { st = stack.id })
 	for offset, sibling in ipairs(following) do
 		place(doc, sibling, stack.ids, at + offset, { st = stack.id })
@@ -217,7 +230,6 @@ function d.remove(doc, block)
 		end
 		doc.blocks[current.id] = nil
 	end
-	dropEmptyStacks(doc)
 end
 
 -- Deep copy onto the canvas at (x, y).

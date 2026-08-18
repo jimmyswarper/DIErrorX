@@ -42,7 +42,8 @@ def collect(entry_sources):
 def main():
     test_path = pathlib.Path(sys.argv[1])
     test_src = test_path.read_text()
-    stub = (ROOT / "tests" / "stub.luau").read_text()
+    stub = ((ROOT / "tests" / "mock.luau").read_text() + "\n"
+            + (ROOT / "tests" / "stub.luau").read_text())
 
     names = collect([test_src, stub])
     out = [

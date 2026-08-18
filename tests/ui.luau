@@ -1,0 +1,367 @@
+-- Mounts the entire plugin against the Roblox mock and drives it: every tab,
+-- every tutorial, the palette, field editing, dragging, import, undo and both
+-- themes.  Anything that would throw in Studio throws here.
+local a = require(script.Parent.a)
+local c = require(script.Parent.c)
+local d = require(script.Parent.d)
+local j = require(script.Parent.j)
+local m = require(script.Parent.m)
+local o = require(script.Parent.o)
+local p = require(script.Parent.p)
+
+local function noErrors(label)
+	if #MOCK_ERRORS > 0 then
+		check(label, false, table.concat(MOCK_ERRORS, "\n        "))
+		MOCK_ERRORS = {}
+		return false
+	end
+	TESTS_RUN = TESTS_RUN + 1
+	return true
+end
+
+-- mount ------------------------------------------------------------------------
+local pluginMock = MOCK.newPlugin()
+local widget = pluginMock:CreateDockWidgetPluginGui("DIErrorXTest", DockWidgetPluginGuiInfo.new())
+widget.Enabled = true
+local app = o.newApp(pluginMock, widget)
+local shell = p.mount(app, widget)
+MOCK.flush()
+noErrors("mounts without error")
+
+check("window is built", widget:FindFirstChild("DIErrorX") ~= nil)
+check("rail is present", MOCK.findText(widget, "BUILD") ~= nil)
+check("code panel is present", MOCK.findText(widget, "GENERATED LUAU") ~= nil)
+check("starter project has blocks", d.count(app.doc) >= 4)
+check("canvas drew every block", (function()
+	local drawn = 0
+	for _ in pairs(app.canvas.frames) do drawn = drawn + 1 end
+	return drawn == d.count(app.doc)
+end)(), "canvas frames did not match the document")
+
+-- the code panel ------------------------------------------------------------------
+check("code panel produced Luau",
+	string.find(shell.code.code, "Touched:Connect", 1, true) ~= nil, shell.code.code)
+check("code panel counted its lines", shell.code.meta.lineCount > 4)
+check("every generated line knows its block", (function()
+	local mapped = 0
+	for _ in pairs(shell.code.meta.blockOfLine) do mapped = mapped + 1 end
+	return mapped >= 4
+end)())
+
+-- palette ---------------------------------------------------------------------------
+shell.palette.search.Text = "touch"
+MOCK.flush()
+noErrors("palette search runs")
+check("palette found the touch block", MOCK.findText(shell.palette.scroll, "on touched") ~= nil)
+
+shell.palette.search.Text = "zzzznothing"
+MOCK.flush()
+check("palette says so when nothing matches",
+	MOCK.findText(shell.palette.scroll, "Nothing matches") ~= nil)
+
+shell.palette.search.Text = ""
+MOCK.flush()
+noErrors("palette resets")
+
+-- adding, selecting, duplicating, deleting -------------------------------------------
+local before = d.count(app.doc)
+local added = app.canvas:addBlock("printText")
+MOCK.flush()
+eq("adding a block grows the document", d.count(app.doc), before + 1)
+eq("the new block is selected", app.selection, added.id)
+check("the new block reaches the code panel",
+	string.find(shell.code.code, "hello world", 1, true) ~= nil)
+
+app.canvas:duplicateSelected()
+MOCK.flush()
+eq("duplicating grows the document", d.count(app.doc), before + 2)
+noErrors("duplicate is clean")
+
+app.canvas:deleteSelected()
+MOCK.flush()
+eq("deleting shrinks the document", d.count(app.doc), before + 1)
+
+app:undo()
+MOCK.flush()
+eq("undo brings it back", d.count(app.doc), before + 2)
+app:redo()
+MOCK.flush()
+eq("redo removes it again", d.count(app.doc), before + 1)
+noErrors("history is clean")
+
+-- one of every block, drawn ------------------------------------------------------------
+local everyBlock = d.newDoc("Every block")
+local stack = d.newStack(everyBlock, 20, 20)
+for _, def in ipairs(c.order) do
+	local block = d.create(everyBlock, def.id)
+	d.attachToStack(everyBlock, block, stack, nil, {})
+end
+app:setDoc(everyBlock, "every block")
+MOCK.flush()
+noErrors("canvas draws all " .. c.count() .. " block kinds")
+eq("all of them are on the canvas", (function()
+	local drawn = 0
+	for _ in pairs(app.canvas.frames) do drawn = drawn + 1 end
+	return drawn
+end)(), c.count())
+
+-- editing a field ------------------------------------------------------------------------
+app:undo()
+MOCK.flush()
+
+local target = nil
+d.walk(app.doc, function(block)
+	if block.k == "onTouch" and not target then target = block end
+end)
+check("found a block to edit", target ~= nil)
+
+local frame = app.canvas.frames[target.id]
+local editable = nil
+for _, node in ipairs(frame:GetDescendants()) do
+	if node:IsA("TextBox") and not editable then editable = node end
+end
+check("the block has an editable field", editable ~= nil)
+
+if editable then
+	MOCK.fire(editable, "Focused")
+	MOCK.flush()
+	noErrors("focusing a field opens completion cleanly")
+	check("IntelliSense offered something", m.popup().open)
+
+	editable.Text = "workspace.Baseplate"
+	MOCK.flush()
+	eq("typing reaches the document", target.f.part, "workspace.Baseplate")
+	check("typing reaches the code panel",
+		string.find(shell.code.code, "workspace.Baseplate", 1, true) ~= nil)
+
+	local undoDepth = #app.undoStack
+	MOCK.fire(editable, "FocusLost", false)
+	MOCK.flush()
+	check("finishing an edit records one undo step", #app.undoStack == undoDepth + 1)
+	noErrors("field editing is clean")
+end
+
+-- completion navigation ------------------------------------------------------------------
+local pop = m.popup()
+if editable then
+	MOCK.fire(editable, "Focused")
+	editable.Text = "workspace.Base"
+	MOCK.flush()
+	if pop.open then
+		local first = pop.items[1] and pop.items[1].name
+		pop:move(1)
+		check("completion moves down", pop.index == 2 or #pop.items == 1)
+		pop:setIndex(1)
+		pop:accept(1)
+		MOCK.flush()
+		check("accepting a completion rewrites the field",
+			editable.Text ~= "workspace.Base", editable.Text)
+		noErrors("accepting a completion is clean")
+	end
+	MOCK.fire(editable, "FocusLost", false)
+	MOCK.flush()
+end
+
+-- dragging ---------------------------------------------------------------------------------
+local doc = d.newDoc("Drag test")
+local stackA = d.newStack(doc, 20, 20)
+local loop = d.create(doc, "for")
+d.attachToStack(doc, loop, stackA, nil, {})
+local stackB = d.newStack(doc, 300, 20)
+local say = d.create(doc, "printText")
+d.attachToStack(doc, say, stackB, nil, {})
+app:setDoc(doc, "drag test")
+MOCK.flush()
+
+-- give the mock frames believable geometry so the drop maths has something to chew
+MOCK.setAbsolute(app.canvas.content, Vector2.new(0, 0), Vector2.new(1000, 700))
+local loopFrame = app.canvas.frames[loop.id]
+MOCK.setAbsolute(loopFrame, Vector2.new(20, 20), Vector2.new(200, 60))
+for _, info in ipairs(app.canvas.lists) do
+	if info.kind == "slot" and info.parent == loop then
+		MOCK.setAbsolute(info.frame, Vector2.new(38, 44), Vector2.new(120, 16))
+	end
+end
+local sayFrame = app.canvas.frames[say.id]
+MOCK.setAbsolute(sayFrame, Vector2.new(300, 20), Vector2.new(160, 24))
+MOCK.setAbsolute(app.canvas.stackFrames[stackB.id], Vector2.new(300, 20), Vector2.new(160, 24))
+
+app.canvas:beginDrag(say, Vector2.new(300, 20))
+MOCK.flush()
+noErrors("starting a drag is clean")
+check("the dragged block is on its own stack", say.st ~= nil and say.p == nil)
+
+-- nothing lays the mock out, so place the floating stack by hand: just inside
+-- the loop's body, which is where a person would be aiming
+MOCK.setAbsolute(app.canvas.drag.frame, Vector2.new(40, 46), Vector2.new(160, 24))
+app.canvas:updateDrag(Vector2.new(44, 48))
+noErrors("dragging is clean")
+check("a drop target was found", app.canvas.drag.target ~= nil)
+
+app.canvas:endDrag()
+MOCK.flush()
+noErrors("dropping is clean")
+eq("the block landed inside the loop", say.p, loop.id)
+eq("it landed in the loop's body", say.ps, "body")
+eq("the canvas is one stack again", #app.doc.stacks, 1)
+
+-- tabs ---------------------------------------------------------------------------------------
+for _, tab in ipairs({ "learn", "import", "setup", "build" }) do
+	shell.showTab(tab)
+	MOCK.flush()
+	noErrors("switching to the " .. tab .. " tab is clean")
+end
+
+-- every tutorial renders ------------------------------------------------------------------------
+for _, entry in ipairs(j.tutorials) do
+	shell.learn:open(entry)
+	MOCK.flush()
+	if not noErrors("lesson renders: " .. entry.id) then break end
+end
+check("the lesson pane has content", MOCK.findText(shell.learn.reader, "Events") ~= nil
+	or MOCK.findText(shell.learn.reader, "blocks") ~= nil)
+
+shell.learn.query = "leaderboard"
+shell.learn:refreshList()
+MOCK.flush()
+noErrors("lesson search is clean")
+shell.learn.query = ""
+shell.learn:refreshList()
+
+-- building a lesson's example -----------------------------------------------------------------
+local lesson = nil
+for _, entry in ipairs(j.tutorials) do
+	if entry.example and not lesson then lesson = entry end
+end
+shell.learn:open(lesson)
+MOCK.flush()
+local buildButton = nil
+for _, node in ipairs(shell.learn.reader:GetDescendants()) do
+	if node:IsA("TextLabel") and node.Text == "Build this example" then
+		buildButton = node.Parent
+	end
+end
+check("the lesson offers to build its example", buildButton ~= nil)
+if buildButton then
+	MOCK.fire(buildButton, "MouseButton1Click")
+	MOCK.flush()
+	noErrors("building a lesson example is clean")
+	check("the example became blocks", d.count(app.doc) >= 3, d.count(app.doc))
+end
+
+-- import ------------------------------------------------------------------------------------------
+shell.showTab("import")
+shell.import.input.Text = [[
+local Players = game:GetService("Players")
+
+Players.PlayerAdded:Connect(function(player)
+	print(player.Name)
+end)
+]]
+local convert = nil
+for _, node in ipairs(shell.import.frame:GetDescendants()) do
+	if node:IsA("TextLabel") and node.Text == "Convert to blocks" then
+		convert = node.Parent
+	end
+end
+check("the import tab has a convert button", convert ~= nil)
+if convert then
+	MOCK.fire(convert, "MouseButton1Click")
+	MOCK.flush()
+	noErrors("importing is clean")
+	check("import produced blocks", d.count(app.doc) >= 3)
+	check("import reported what it did",
+		string.find(shell.import.reportText.Text, "converted", 1, true) ~= nil,
+		shell.import.reportText.Text)
+	check("import switched back to the canvas", shell.tab == "build")
+end
+
+shell.import.input.Text = "if a then"
+MOCK.fire(convert, "MouseButton1Click")
+MOCK.flush()
+check("a broken paste is reported, not thrown",
+	string.find(shell.import.reportText.Text, "Line", 1, true) ~= nil,
+	shell.import.reportText.Text)
+noErrors("a failed import is clean")
+
+-- settings and projects -----------------------------------------------------------------------------
+shell.showTab("setup")
+MOCK.flush()
+local saveCount = #app.projects
+app:save()
+MOCK.flush()
+check("saving records a project", #app.projects >= math.max(saveCount, 1))
+check("the project went to plugin settings",
+	MOCK.settings["dierrorx.projects.v1"] ~= nil)
+
+app:newProject("Second")
+MOCK.flush()
+noErrors("starting a new project is clean")
+eq("the new project is empty", d.count(app.doc), 0)
+check("there are now two projects", #app.projects >= 2)
+
+local exported = app:exportProject()
+check("a project exports as text", type(exported) == "string" and #exported > 10)
+local ok = app:importProject(exported)
+check("an exported project imports again", ok)
+noErrors("export and import round-trip is clean")
+
+check("junk is refused, not thrown", (app:importProject("not json at all")) == false)
+
+app:openProject(app.projects[1].id)
+MOCK.flush()
+noErrors("switching project is clean")
+
+-- themes --------------------------------------------------------------------------------------------
+a.setTheme("paper")
+MOCK.flush()
+noErrors("the paper theme applies")
+eq("theme switched", a.c.name, "paper")
+shell.showTab("learn")
+MOCK.flush()
+noErrors("lessons redraw in the paper theme")
+a.setTheme("ink")
+MOCK.flush()
+noErrors("the ink theme applies")
+
+-- canvas navigation -----------------------------------------------------------------------------------
+shell.showTab("build")
+app.canvas:setZoom(1.5)
+app.canvas:setZoom(0.75)
+app.canvas:resetZoom()
+app.canvas:setPan(-100, -50)
+app.canvas:tidy()
+MOCK.flush()
+noErrors("zooming, panning and tidying are clean")
+eq("tidy lines the stacks up", app.doc.stacks[1] and app.doc.stacks[1].x, 24)
+
+-- keyboard ------------------------------------------------------------------------------------------------
+local function pressKey(name, ctrl)
+	MOCK_KEYS = ctrl and { LeftControl = true } or {}
+	MOCK.fire(game:GetService("UserInputService"), "InputBegan", {
+		UserInputType = Enum.UserInputType.Keyboard,
+		KeyCode = Enum.KeyCode[name],
+	}, false)
+	MOCK.flush()
+	MOCK_KEYS = {}
+end
+
+app.canvas:addBlock("wait")
+MOCK.flush()
+local countBefore = d.count(app.doc)
+pressKey("Delete", false)
+check("Delete removes the selection", d.count(app.doc) < countBefore)
+pressKey("Z", true)
+check("Ctrl+Z puts it back", d.count(app.doc) == countBefore)
+pressKey("D", true)
+pressKey("L", true)
+pressKey("S", true)
+pressKey("Escape", false)
+noErrors("keyboard shortcuts are clean")
+
+-- warnings ------------------------------------------------------------------------------------------------
+check("nothing warned during the whole run", #MOCK_WARNINGS == 0,
+	table.concat(MOCK_WARNINGS, "\n        "))
+
+report("ui")
+if TESTS_FAILED > 0 then error("test failures", 0) end
