@@ -268,14 +268,6 @@ function b.button(props)
 	return button, text
 end
 
--- A flat button that only shows its edges on hover -- used in dense toolbars.
-function b.quiet(props)
-	props = props or {}
-	props.bg = "panel"
-	props.hoverAmount = 0.18
-	return b.button(props)
-end
-
 --=============================================================================
 -- decoration
 --=============================================================================
@@ -317,32 +309,6 @@ function b.chevron(size, token)
 		})
 	end
 	return frame
-end
-
--- Hard-offset shadow, like a sheet of paper lifted off the table.  Used only
--- for things that are genuinely floating.
-function b.lift(gui, distance)
-	distance = distance or 3
-	local shadow = b.new("Frame", {
-		Size = UDim2.new(1, 0, 1, 0),
-		Position = UDim2.fromOffset(distance, distance),
-		bg = "shadow",
-		BackgroundTransparency = 0.72,
-		ZIndex = (gui.ZIndex or 1) - 1,
-		radius = 0,
-	})
-	shadow.Parent = gui.Parent
-	local function follow()
-		shadow.Position = UDim2.new(
-			gui.Position.X.Scale, gui.Position.X.Offset + distance,
-			gui.Position.Y.Scale, gui.Position.Y.Offset + distance)
-		shadow.Size = gui.Size
-	end
-	gui:GetPropertyChangedSignal("Position"):Connect(follow)
-	gui:GetPropertyChangedSignal("Size"):Connect(follow)
-	gui.Destroying:Connect(function() shadow:Destroy() end)
-	follow()
-	return shadow
 end
 
 --=============================================================================

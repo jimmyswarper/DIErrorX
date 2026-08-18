@@ -29,6 +29,9 @@ MOCK.flush()
 noErrors("mounts without error")
 
 check("window is built", widget:FindFirstChild("DIErrorX") ~= nil)
+eq("a first run opens on the lessons", shell.tab, "learn")
+shell.showTab("build")
+MOCK.flush()
 check("rail is present", MOCK.findText(widget, "BUILD") ~= nil)
 check("code panel is present", MOCK.findText(widget, "GENERATED LUAU") ~= nil)
 check("starter project has blocks", d.count(app.doc) >= 4)
@@ -446,6 +449,24 @@ pressKey("L", true)
 pressKey("S", true)
 pressKey("Escape", false)
 noErrors("keyboard shortcuts are clean")
+
+-- no block may contain a child whose size depends on the block's own size ------------------
+do
+	shell.showTab("build")
+	local anyBlock = nil
+	d.walk(app.doc, function(block) anyBlock = anyBlock or block end)
+	local frame = app.canvas.frames[anyBlock.id]
+	check("a block's height comes only from its content", (function()
+		for _, node in ipairs(frame:GetChildren()) do
+			if node:IsA("GuiObject") then
+				local size = node.Size
+				-- a scale-sized child inside an auto-sizing parent is the loop
+				if size and size.Y and size.Y.Scale ~= 0 then return false end
+			end
+		end
+		return true
+	end)(), "a child is sized from the block, which would stop it shrinking")
+end
 
 -- nothing may leak across re-renders ---------------------------------------------------------
 do

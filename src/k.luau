@@ -119,22 +119,22 @@ function View:codeBlock(code, order, parent)
 end
 
 function View:calloutBlock(text, order, parent, token, label)
+	-- The coloured rule is the frame's own background showing through on the
+	-- left; a child sized to the parent's height would hold an auto-sizing
+	-- parent open.
 	local frame = b.new("Frame", {
 		Size = UDim2.new(1, 0, 0, 0),
 		AutomaticSize = Enum.AutomaticSize.Y,
 		LayoutOrder = order,
+		bg = token,
 		Parent = parent,
 	})
-	b.new("Frame", {
-		Size = UDim2.new(0, 2, 1, 0),
-		bg = token,
-		Parent = frame,
-	})
 	local column = b.new("Frame", {
-		Size = UDim2.new(1, -18, 0, 0),
+		Size = UDim2.new(1, -14, 0, 0),
 		Position = UDim2.fromOffset(14, 0),
 		AutomaticSize = Enum.AutomaticSize.Y,
 		layout = { dir = "y", gap = 3 },
+		bg = "bg",
 		Parent = frame,
 	})
 	b.micro(label, {
@@ -206,7 +206,7 @@ function View:blockChips(spec, order, parent)
 		LayoutOrder = order,
 		Parent = parent,
 	})
-	local grid = b.new("UIGridLayout", {
+	b.new("UIGridLayout", {
 		CellSize = UDim2.fromOffset(150, 24),
 		CellPadding = UDim2.fromOffset(6, 6),
 		SortOrder = Enum.SortOrder.LayoutOrder,
@@ -250,7 +250,6 @@ function View:blockChips(spec, order, parent)
 		end
 	end
 
-	frame.Size = UDim2.new(1, 0, 0, math.ceil(index / 3) * 30)
 	return frame
 end
 

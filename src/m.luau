@@ -529,13 +529,17 @@ local renderList
 
 local function renderBlock(view, block, order)
 	local def = c.get(block.k)
+
+	-- The category spine is the block's own background showing through on the
+	-- left, rather than a child frame.  A child sized from its parent's height
+	-- would hold the parent open, and the block could never shrink again.
 	local frame = b.new("Frame", {
 		Name = block.id,
 		Size = UDim2.fromOffset(0, 0),
 		AutomaticSize = Enum.AutomaticSize.XY,
 		LayoutOrder = order,
-		bg = "raised",
-		radius = a.metric.radius,
+		BackgroundColor3 = a.catColor(def and def.cat or "special"),
+		BackgroundTransparency = 0,
 	})
 
 	local inner = b.new("Frame", {
@@ -543,19 +547,9 @@ local function renderBlock(view, block, order)
 		AutomaticSize = Enum.AutomaticSize.XY,
 		Position = UDim2.fromOffset(a.metric.spine, 0),
 		layout = { dir = "y", gap = 0 },
+		bg = "raised",
 		Parent = frame,
 	})
-
-	local spine = b.new("Frame", {
-		Size = UDim2.fromOffset(a.metric.spine, 20),
-		BackgroundColor3 = a.catColor(def and def.cat or "special"),
-		BackgroundTransparency = 0,
-		Parent = frame,
-	})
-	frame:GetPropertyChangedSignal("AbsoluteSize"):Connect(function()
-		spine.Size = UDim2.fromOffset(a.metric.spine,
-			frame.AbsoluteSize.Y / math.max(view.zoom, 0.01))
-	end)
 
 	if not def then
 		b.mono({

@@ -469,7 +469,9 @@ function p.mount(app, widget)
 		if id ~= "build" and app.dirty then app:save() end
 	end
 	app.showTab = shell.showTab
-	shell.showTab("build")
+	-- First run has no saved project: open on the lessons rather than dropping
+	-- someone straight onto a canvas they have no vocabulary for yet.
+	shell.showTab(app.projectId and "build" or "learn")
 
 	keyboard(app, shell)
 
