@@ -168,6 +168,12 @@ function a.catColor(catId)
 	return a.c.cats[catId] or a.c.text2
 end
 
+-- Exposed so tests can prove listeners are being released rather than piling up
+-- as the canvas re-renders.
+function a.listenerCount()
+	return #listeners
+end
+
 function a.onChange(callback)
 	listeners[#listeners + 1] = callback
 	return function()

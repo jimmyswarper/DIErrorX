@@ -447,6 +447,22 @@ pressKey("S", true)
 pressKey("Escape", false)
 noErrors("keyboard shortcuts are clean")
 
+-- nothing may leak across re-renders ---------------------------------------------------------
+do
+	shell.showTab("build")
+	app.canvas:render()
+	MOCK.flush()
+	local baseline = a.listenerCount()
+	for _ = 1, 12 do
+		app.canvas:render()
+	end
+	MOCK.flush()
+	check("re-rendering does not pile up theme listeners",
+		a.listenerCount() <= baseline + 2,
+		string.format("%d listeners after twelve renders, was %d",
+			a.listenerCount(), baseline))
+end
+
 -- warnings ------------------------------------------------------------------------------------------------
 check("nothing warned during the whole run", #MOCK_WARNINGS == 0,
 	table.concat(MOCK_WARNINGS, "\n        "))

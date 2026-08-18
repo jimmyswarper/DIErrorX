@@ -191,5 +191,65 @@ return { applyDamage = applyDamage }
 eq("full script: statement count", #chunk.body, 9)
 eq("full script: ends with a return", chunk.body[9].k, "return")
 
+-- awkward but legal Luau, and the emitted code for each ------------------------
+local cases = {
+	"local t = {} :: any",
+	"local x = a and b or c",
+	'local part = game:GetService("Workspace"):FindFirstChild("Baseplate")',
+	"local f = function() end",
+	"local a, b = table.unpack(t)",
+	"for a, b, c in next, t, nil do end",
+	"local n = #t + 1",
+	"local n = -x^2",
+	'local t = { [1] = "a"; y = 2, }',
+	'local s = "a\\"b"',
+	"local s = 'it\\'s'",
+	"--[==[ long ]==]\nlocal x = 1",
+	"type X<T> = { [string]: T }\nlocal y = 1",
+	"local x: {[string]: number} = {}",
+	"if a then elseif b then end",
+	"function t.a.b.c:d() end",
+	"local function f(...) return ... end",
+	'print(("x"):rep(3))',
+	"local s = [[multi\nline]]",
+	"local x = y // 2",
+	"for i = 1, 3 do for j = 1, 3 do continue end end",
+	"export type Id = string\nreturn nil",
+	"local n = 0b1010 + 1_000 + .5",
+	"@native\nlocal function fast() return 1 end",
+	"local ok = if a then 1 else 2",
+	"local v = vec3.X",
+	"t[#t + 1] = 5",
+	"local s = `hi {name}, you have {n} coins`",
+	"while true do task.wait() end",
+	"local m = setmetatable({}, { __index = function(_, k) return k end })",
+	"local co = coroutine.wrap(function() coroutine.yield(1) end)",
+	"local r = workspace:Raycast(origin, direction, params)",
+	"script.Parent.Changed:Connect(print)",
+	"local n: number? = nil",
+	"local fn: (number, string) -> boolean = f",
+	"do end",
+	"local a = (function() return 1 end)()",
+	"return",
+}
+for _, source in ipairs(cases) do
+	local label = string.gsub(source, "\n", " / ")
+	local chunk, err = g.parse(source)
+	check("parses: " .. label, chunk ~= nil,
+		err and string.format("line %d: %s", err.line, err.msg) or nil)
+end
+
+-- forms Luau itself rejects must be rejected here too -----------------------------
+for _, source in ipairs({
+	"local x = a?.b",
+	"local = 5",
+	"if a then",
+	"for i = 1 do end",
+	"function() end",
+	"local x = ",
+}) do
+	check("rejects: " .. source, (g.parse(source)) == nil)
+end
+
 report("parser")
 if TESTS_FAILED > 0 then error("test failures", 0) end

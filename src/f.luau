@@ -34,7 +34,8 @@ local SYM2 = {
 	["/="] = true, ["%="] = true, ["^="] = true, ["//"] = true,
 }
 local SYM1 = {}
-for ch in string.gmatch("+-*/%^#<>=(){}[];:,.?&|", ".") do SYM1[ch] = true end
+-- `@` opens a function attribute such as `@native`.
+for ch in string.gmatch("+-*/%^#<>=(){}[];:,.?&|@", ".") do SYM1[ch] = true end
 
 local function isDigit(c) return c >= "0" and c <= "9" end
 local function isHex(c)

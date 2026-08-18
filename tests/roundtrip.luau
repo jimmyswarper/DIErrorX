@@ -207,6 +207,29 @@ door.Touched:Connect(function(hit)
 	print(hit)
 end)
 ]] },
+	{ "awkward but legal luau", [[
+--!strict
+local CollectionService = game:GetService("CollectionService")
+
+export type Hazard = { damage: number, part: BasePart }
+
+local registry: { [Instance]: Hazard } = {}
+
+@native
+local function compute(a: number, b: number): number
+	return a // b + a % b
+end
+
+local function describe(hazard: Hazard): string
+	return `{hazard.part.Name} hits for {hazard.damage}`
+end
+
+for _, part in ipairs(CollectionService:GetTagged("Hazard")) do
+	local damage = part:GetAttribute("Damage") or 10
+	registry[part] = { damage = damage, part = part }
+	print(describe(registry[part]), compute(damage, 3))
+end
+]] },
 	{ "unsupported code survives", [[
 local mt = setmetatable({}, { __index = function(t, k) return k end })
 

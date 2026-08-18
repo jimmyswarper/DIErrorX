@@ -225,7 +225,10 @@ function b.states(button, baseToken, hoverAmount)
 	end
 	stateHandlers[button] = state
 
-	a.onChange(function() state.paint(0) end)
+	-- The canvas rebuilds its buttons on every render, so this listener has to
+	-- go when the button does, or the theme's listener list grows without end.
+	local unsubscribe = a.onChange(function() state.paint(0) end)
+	button.Destroying:Connect(unsubscribe)
 	b.hover(button, function() state.paint(state.amount) end, function() state.paint(0) end)
 	button.MouseButton1Down:Connect(function() state.paint(state.amount + 0.1) end)
 	button.MouseButton1Up:Connect(function() state.paint(state.amount) end)
