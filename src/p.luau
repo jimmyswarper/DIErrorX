@@ -140,11 +140,17 @@ local function statusBar(app, parent)
 
 	local function paint()
 		local counts = app:stats()
-		local saved = app.dirty and "unsaved" or "saved"
-		stats.Text = string.format("%d blocks   %d stacks   %s   %s",
-			counts.blocks, counts.stacks, saved, app.doc.name)
+		local saved = "unsaved"
+		if not app.dirty then
+			saved = app.lastSaved
+				and ("saved " .. os.date("%H:%M", app.lastSaved))
+				or "saved"
+		end
+		stats.Text = string.format("%d blocks   %d stacks   %s",
+			counts.blocks, counts.stacks, saved)
 	end
 	app:on("doc", paint)
+	app:on("status", paint)
 	app:on("status", function(text)
 		message.Text = text == "" and "ready" or text
 	end)
@@ -256,7 +262,13 @@ local function keyboard(app, shell)
 	widget.WindowFocused:Connect(function() focused = true end)
 	widget.WindowFocusReleased:Connect(function() focused = false end)
 
+	-- Any focused text box counts, not just a block field: Delete while typing
+	-- in the palette search must delete a letter, not the selected block.
 	local function typing()
+		local ok, box = pcall(function()
+			return UserInputService:GetFocusedTextBox()
+		end)
+		if ok and box then return true end
 		local canvas = app.canvas
 		return canvas and canvas.editing ~= nil
 	end

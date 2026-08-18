@@ -689,7 +689,10 @@ function k.mount(app, parent)
 		if view.current then view:showTutorial(view.current) end
 	end)
 
-	view:open(j.tutorials[1])
+	-- opening the tab is not the same as reading a lesson, so this one does not
+	-- count towards progress until it is chosen from the list
+	view:showTutorial(j.tutorials[1])
+	view:refreshList()
 	return view
 end
 

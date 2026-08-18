@@ -456,8 +456,10 @@ function MOCK.fire(instance, event, ...)
 	if event == "Focused" and instance:IsA("TextBox") then
 		data.focused = true
 		data.properties.CursorPosition = #tostring(instance.Text) + 1
+		MOCK_FOCUSED_BOX = instance
 	elseif event == "FocusLost" and instance:IsA("TextBox") then
 		data.focused = false
+		if MOCK_FOCUSED_BOX == instance then MOCK_FOCUSED_BOX = nil end
 	end
 	local signal = data.events[event]
 	if not signal then return false end
@@ -717,6 +719,10 @@ service("Selection")
 METHODS.Set = function() end
 
 local UserInputService = service("UserInputService")
+METHODS.GetFocusedTextBox = function()
+	return MOCK_FOCUSED_BOX
+end
+MOCK_FOCUSED_BOX = nil
 METHODS.IsKeyDown = function(_, keyCode)
 	return MOCK_KEYS[keyCode and keyCode.Name] == true
 end

@@ -23,7 +23,7 @@ local toolbar = plugin:CreateToolbar(TITLE)
 local button = toolbar:CreateButton(
 	"Blocks",
 	"Build Roblox scripts out of blocks, and read the Luau as you go",
-	"rbxasset://textures/StudioSharedUI/menu.png")
+	"")
 button.ClickableWhenViewportHidden = true
 
 local widgetInfo = DockWidgetPluginGuiInfo.new(

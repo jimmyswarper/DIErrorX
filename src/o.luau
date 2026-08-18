@@ -27,6 +27,7 @@ local DEFAULT_SETTINGS = {
 	scriptKind = "Script",
 	showCode = true,
 	banner = true,
+	read = {},
 }
 
 local App = {}

@@ -162,6 +162,25 @@ if editable then
 	MOCK.flush()
 end
 
+-- typing again after accepting a completion must reopen the list -----------------------------
+if editable then
+	MOCK.fire(editable, "Focused")
+	editable.Text = "work"
+	MOCK.flush()
+	check("completion opens while typing", m.popup().open)
+	m.popup():accept(1)
+	MOCK.flush()
+	check("the list closes once a completion is taken", not m.popup().open,
+		"it should not offer back the word just accepted")
+	editable.Text = editable.Text .. ".Grav"
+	MOCK.flush()
+	check("the list comes back on the next keystroke", m.popup().open,
+		"popup stayed shut after an accept")
+	MOCK.fire(editable, "FocusLost", false)
+	MOCK.flush()
+	noErrors("completion lifecycle is clean")
+end
+
 -- dragging ---------------------------------------------------------------------------------
 local doc = d.newDoc("Drag test")
 local stackA = d.newStack(doc, 20, 20)
@@ -204,6 +223,75 @@ noErrors("dropping is clean")
 eq("the block landed inside the loop", say.p, loop.id)
 eq("it landed in the loop's body", say.ps, "body")
 eq("the canvas is one stack again", #app.doc.stacks, 1)
+
+-- an empty canvas explains itself ------------------------------------------------------
+local emptyDoc = d.newDoc("Nothing")
+app:setDoc(emptyDoc, "empty")
+MOCK.flush()
+check("the empty canvas says what to do",
+	MOCK.findText(app.canvas.root, "Nothing here yet") ~= nil)
+app:undo()
+MOCK.flush()
+check("and the hint goes once there are blocks again",
+	MOCK.findText(app.canvas.root, "Nothing here yet") == nil)
+
+-- Enter in the palette search places the top match -----------------------------------------
+shell.palette.search.Text = "wait"
+MOCK.flush()
+local countBeforeEnter = d.count(app.doc)
+MOCK.fire(shell.palette.search, "FocusLost", true)
+MOCK.flush()
+eq("Enter in the search box adds the top match", d.count(app.doc), countBeforeEnter + 1)
+shell.palette.search.Text = ""
+MOCK.flush()
+app:undo()
+MOCK.flush()
+
+-- typing must not trigger canvas shortcuts ---------------------------------------------------
+do
+	local blocksBefore = d.count(app.doc)
+	MOCK.fire(shell.palette.search, "Focused")
+	MOCK_KEYS = {}
+	MOCK.fire(game:GetService("UserInputService"), "InputBegan", {
+		UserInputType = Enum.UserInputType.Keyboard,
+		KeyCode = Enum.KeyCode.Delete,
+	}, false)
+	MOCK.flush()
+	eq("Delete while typing does not delete a block", d.count(app.doc), blocksBefore)
+	MOCK.fire(shell.palette.search, "FocusLost", false)
+	MOCK.flush()
+end
+
+-- clicking a field selects rather than drags ---------------------------------------------------
+do
+	local anyBlock = nil
+	d.walk(app.doc, function(block) anyBlock = anyBlock or block end)
+	local frame = app.canvas.frames[anyBlock.id]
+	local box = nil
+	for _, node in ipairs(frame:GetDescendants()) do
+		if node:IsA("TextBox") and not box then box = node end
+	end
+	if box then
+		MOCK.setAbsolute(box, Vector2.new(60, 60), Vector2.new(80, 18))
+		MOCK_MOUSE = Vector2.new(80, 66)
+		app.canvas:beginPress(anyBlock, { UserInputType = Enum.UserInputType.MouseButton1 })
+		MOCK.flush()
+		check("pressing a field does not start a drag", app.canvas.dragging ~= true)
+		eq("but it does select the block", app.selection, anyBlock.id)
+		MOCK_MOUSE = Vector2.new(0, 0)
+	end
+end
+
+-- settings survive a reload ------------------------------------------------------------------------
+do
+	local read = { ["cat-events"] = true }
+	app:setSetting("read", read)
+	app:save()
+	local reopened = o.newApp(pluginMock, widget)
+	check("tutorial progress survives a reload",
+		type(reopened.settings.read) == "table" and reopened.settings.read["cat-events"] == true)
+	eq("the theme setting survives too", reopened.settings.theme, app.settings.theme)
+end
 
 -- tabs ---------------------------------------------------------------------------------------
 for _, tab in ipairs({ "learn", "import", "setup", "build" }) do

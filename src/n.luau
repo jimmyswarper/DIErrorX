@@ -295,7 +295,7 @@ function n.codePanel(app, parent)
 		"Script; input and interface want a LocalScript.")
 
 	app:on("doc", function() view:refresh() end)
-	app:on("codeDirty", function() view:refresh() end)
+	app:on("codeDirty", function() view:queueRefresh() end)
 	app:on("hover", function(blockId) view:highlightBlock(blockId) end)
 	a.onChange(function() view:refresh() end)
 
@@ -305,7 +305,18 @@ end
 
 local MAX_INTERACTIVE_LINES = 700
 
+-- Typing fires per keystroke; rebuilding a few hundred labels that often is
+-- wasteful, so redraws are coalesced into roughly ten a second.
+function Code:queueRefresh()
+	self.refreshToken = (self.refreshToken or 0) + 1
+	local token = self.refreshToken
+	task.delay(0.1, function()
+		if token == self.refreshToken then self:refresh() end
+	end)
+end
+
 function Code:refresh()
+	self.refreshToken = (self.refreshToken or 0) + 1
 	local app = self.app
 	local code, meta = e.generate(app.doc, { header = app.settings.banner })
 	self.code = code

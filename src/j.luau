@@ -831,7 +831,7 @@ T{
 		{ h = "Saving" },
 		{ p = "Ctrl+S, or the Save button. The canvas also saves itself when you close the window and when you switch tabs, so a crash costs you very little. The status bar shows when the last save happened." },
 		{ h = "Several projects" },
-		{ p = "The project menu at the top left lists everything you have saved, and lets you start a new one or copy the current one. Names are yours to choose; give them the name of the thing they build rather than 'test2'." },
+		{ p = "The Setup tab lists every project you have saved, and lets you switch between them, start a new one, or copy the current one. The name at the top left of the window is editable in place; give a project the name of the thing it builds rather than 'test2'." },
 		{ list = {
 			"Ctrl+S saves. The status bar shows the time of the last save.",
 			"Switching tabs or closing the window saves too.",

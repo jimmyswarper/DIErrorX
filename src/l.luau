@@ -257,6 +257,14 @@ function l.mount(app, parent)
 		view.query = view.search.Text
 		view:refresh()
 	end)
+	-- Ctrl+F, a few letters, Enter: the block lands without touching the mouse.
+	view.search.FocusLost:Connect(function(enterPressed)
+		if not enterPressed or not view.topHit then return end
+		if app.canvas then
+			app.canvas:addBlock(view.topHit.id)
+			app:setStatus("added " .. view.topHit.label)
+		end
+	end)
 
 	-- list --------------------------------------------------------------------
 	view.scroll = b.new("ScrollingFrame", {
@@ -296,6 +304,7 @@ function View:refresh()
 	local order = 1
 
 	local hits = l.search(self.query)
+	self.topHit = hits and hits[1] or nil
 	if hits then
 		b.micro(#hits .. " matching", {
 			Size = UDim2.new(1, 0, 0, 20),

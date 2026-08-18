@@ -320,8 +320,10 @@ local function makeTextField(view, block, def, field, value)
 	local pop = getPopup()
 	local before = nil
 
+	-- Keyed on which field has focus rather than on which one the popup last
+	-- belonged to, so accepting a completion does not stop the list coming back.
 	local function refreshCompletion()
-		if pop.textBox ~= box then return end
+		if view.editing ~= box then return end
 		local cursor = box.CursorPosition or -1
 		if cursor < 0 then return end
 		local result = i.complete({
@@ -335,19 +337,29 @@ local function makeTextField(view, block, def, field, value)
 		pop:show(box, result, signature, box)
 	end
 
-	pop.onAccept = function(target)
-		if target == box then
-			block.f[field.key] = box.Text
-			app:emit("codeDirty")
-			task.defer(refreshCompletion)
-		end
-	end
-
 	box.Focused:Connect(function()
 		before = app:mark()
-		pop.textBox = box
 		view.editing = box
 		view.refreshCompletion = refreshCompletion
+		-- the popup is shared, so it learns who it is serving on focus
+		pop.onAccept = function(target)
+			if target ~= box then return end
+			block.f[field.key] = box.Text
+			app:emit("codeDirty")
+			-- Reopening the whole list here would just offer back the word that
+			-- was accepted; what is useful after taking a method is its
+			-- signature, so show that alone and let typing bring the list back.
+			task.defer(function()
+				if view.editing ~= box then return end
+				local cursor = box.CursorPosition or -1
+				if cursor < 0 then return end
+				local signature = i.signature(box.Text, cursor, app.doc)
+				if signature then
+					pop:show(box, { items = {}, from = cursor, cursor = cursor },
+						signature, box)
+				end
+			end)
+		end
 		app:select(block.id)
 		refreshCompletion()
 	end)
@@ -791,6 +803,10 @@ function View:render()
 	self.rendering = true
 
 	b.clear(self.content)
+	if self.empty then
+		self.empty:Destroy()
+		self.empty = nil
+	end
 	self.frames = {}
 	self.strokes = {}
 	self.lists = {}
@@ -809,6 +825,41 @@ function View:render()
 		renderList(self, d.stackBlocks(self.app.doc, stack), frame, {
 			kind = "stack", stack = stack, frame = frame,
 		})
+	end
+
+	if #self.app.doc.stacks == 0 then
+		self.empty = b.new("Frame", {
+			Size = UDim2.fromOffset(340, 60),
+			Position = UDim2.fromScale(0.5, 0.42),
+			AnchorPoint = Vector2.new(0.5, 0.5),
+			ZIndex = 3,
+			Parent = self.root,
+		})
+		b.text({
+			Text = "Nothing here yet",
+			Size = UDim2.new(1, 0, 0, 20),
+			Font = a.font.uiBold,
+			TextSize = 14,
+			fg = "text3",
+			TextXAlignment = Enum.TextXAlignment.Center,
+			ZIndex = 4,
+			Parent = self.empty,
+		})
+		b.text({
+			Text = "Drag a block out of the palette, or press Ctrl+F to search it.\n" ..
+				"The Learn tab starts from the very beginning.",
+			Size = UDim2.new(1, 0, 0, 34),
+			Position = UDim2.fromOffset(0, 22),
+			TextWrapped = true,
+			TextSize = 12,
+			fg = "text3",
+			TextXAlignment = Enum.TextXAlignment.Center,
+			ZIndex = 4,
+			Parent = self.empty,
+		})
+	elseif self.empty then
+		self.empty:Destroy()
+		self.empty = nil
 	end
 
 	self.content.Position = UDim2.fromOffset(self.pan.X, self.pan.Y)
@@ -1116,10 +1167,49 @@ function View:endDrag()
 	self.dragBefore = nil
 end
 
+-- Input bubbles up from a block's fields to the block itself, so dragging has
+-- to ask whether the press actually landed on a field first -- otherwise
+-- selecting text in a field would pick the whole stack up.
+function View:overField(block)
+	local frame = self.frames[block.id]
+	if not frame then return false end
+	local gui = self:pluginGui()
+	if not gui then return false end
+	local mouse = gui:GetRelativeMousePosition()
+	for _, node in ipairs(frame:GetDescendants()) do
+		if node:IsA("TextBox") or node:IsA("TextButton") then
+			local at, size = node.AbsolutePosition, node.AbsoluteSize
+			if mouse.X >= at.X and mouse.X <= at.X + size.X
+				and mouse.Y >= at.Y and mouse.Y <= at.Y + size.Y then
+				return true
+			end
+		end
+	end
+	return false
+end
+
 function View:beginPress(block, input)
 	if self.dragging then return end
 	local gui = self:pluginGui()
 	if not gui then return end
+	if input and self:overField(block) then
+		self.app:select(block.id)
+		return
+	end
+
+	-- Space turns the whole canvas into a hand tool, blocks included.
+	if UserInputService:IsKeyDown(Enum.KeyCode.Space) then
+		local start = gui:GetRelativeMousePosition()
+		local startPan = self.pan
+		task.spawn(function()
+			while UserInputService:IsMouseButtonPressed(Enum.UserInputType.MouseButton1) do
+				local delta = gui:GetRelativeMousePosition() - start
+				self:setPan(startPan.X + delta.X, startPan.Y + delta.Y)
+				RunService.Heartbeat:Wait()
+			end
+		end)
+		return
+	end
 
 	self.app:select(block.id)
 	local start = gui:GetRelativeMousePosition()
