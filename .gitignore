@@ -1,3 +1,5 @@
 build/
-*.rbxmx
 *.rbxm
+
+# dist/DIErrorX.rbxmx is committed on purpose: it is the ready-to-install
+# plugin, and tools/test.sh fails if it drifts from src/.

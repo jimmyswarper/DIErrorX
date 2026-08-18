@@ -26,16 +26,18 @@ get an editable canvas back.
 
 ## Installing
 
-**Without any tooling.** Build the model file and drop it in Studio's plugins
-folder:
+**Without any tooling.** `dist/DIErrorX.rbxmx` is committed, ready to install.
+In Studio: **Plugins → Plugins Folder**, copy the file in, and restart Studio.
+(Or drag it into Studio, right-click the model in the Explorer, and choose
+*Save as Local Plugin*.)
+
+To rebuild it after changing anything in `src/`:
 
 ```sh
-python3 tools/build.py          # writes build/DIErrorX.rbxmx
+python3 tools/build.py          # rewrites dist/DIErrorX.rbxmx
 ```
 
-Then in Studio: **Plugins → Plugins Folder**, copy `DIErrorX.rbxmx` in, and
-restart Studio. (Or drag the file into Studio, right-click the model in the
-Explorer, and choose *Save as Local Plugin*.)
+`tools/test.sh` fails if that file has drifted from the source.
 
 **With [Rojo](https://rojo.space).** The repository is a Rojo project already:
 

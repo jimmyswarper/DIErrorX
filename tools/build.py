@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
 """Build DIErrorX.rbxmx from src/, for installing without Rojo.
 
-    python3 tools/build.py [--out build/DIErrorX.rbxmx]
+    python3 tools/build.py [--out dist/DIErrorX.rbxmx]
 
 The result is a model file containing one Script (the plugin) with the lettered
-ModuleScripts inside it.  Drop it in your Studio plugins folder, or right-click
+ModuleScripts inside it.  dist/DIErrorX.rbxmx is committed so the plugin can be
+installed without any tooling at all; tools/test.sh checks it is still current.  Drop it in your Studio plugins folder, or right-click
 it in Studio and choose "Save as Local Plugin".
 """
 import argparse
@@ -41,7 +42,7 @@ def item(class_name: str, name: str, source: str, referent: int, children: str =
 
 def main() -> int:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--out", default=str(ROOT / "build" / "DIErrorX.rbxmx"))
+    parser.add_argument("--out", default=str(ROOT / "dist" / "DIErrorX.rbxmx"))
     args = parser.parse_args()
 
     entry = SRC / ENTRY

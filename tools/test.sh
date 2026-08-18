@@ -39,4 +39,19 @@ for suite in tests/*.luau; do
 	rm -f "$bundle"
 done
 
+echo "packaging"
+built=$(mktemp /tmp/dierrorx-build-XXXXXX.rbxmx)
+if python3 tools/build.py --out "$built" > /dev/null; then
+	if cmp -s "$built" dist/DIErrorX.rbxmx; then
+		echo "  ok    dist/DIErrorX.rbxmx matches src/"
+	else
+		echo "  FAIL  dist/DIErrorX.rbxmx is stale -- run: python3 tools/build.py"
+		fail=1
+	fi
+else
+	echo "  FAIL  the model file did not build"
+	fail=1
+fi
+rm -f "$built"
+
 exit $fail
