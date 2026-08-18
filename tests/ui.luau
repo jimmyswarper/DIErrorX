@@ -184,6 +184,32 @@ if editable then
 	noErrors("completion lifecycle is clean")
 end
 
+-- a completion accepted with the mouse must survive the field losing focus -------------------
+if editable then
+	MOCK.fire(editable, "Focused")
+	editable.Text = "workspace.Gra"
+	MOCK.flush()
+	check("the list is open before the click", m.popup().open)
+
+	-- clicking a row is: pointer over the popup, then the field loses focus,
+	-- then the row's click arrives
+	m.popup().hovering = true
+	MOCK.fire(editable, "FocusLost", false)
+	MOCK.flush()
+	check("the list survives the field losing focus to it", m.popup().open,
+		"the popup closed before the click could land")
+
+	local row = m.popup().rows[1]
+	MOCK.fire(row, "MouseButton1Click")
+	MOCK.flush()
+	eq("clicking a completion inserts it", editable.Text, "workspace.Gravity")
+	eq("and the block kept the value", target.f.part, "workspace.Gravity")
+	m.popup().hovering = false
+	MOCK.fire(editable, "FocusLost", false)
+	MOCK.flush()
+	noErrors("clicking a completion is clean")
+end
+
 -- dragging ---------------------------------------------------------------------------------
 local doc = d.newDoc("Drag test")
 local stackA = d.newStack(doc, 20, 20)

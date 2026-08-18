@@ -108,6 +108,12 @@ local function newPopup()
 		Parent = self.docPane,
 	})
 
+	-- Clicking a row takes focus off the field, and the field's FocusLost would
+	-- otherwise close the list before the click was delivered.  This flag lets
+	-- the field tell "clicked the list" apart from "clicked away".
+	self.frame.MouseEnter:Connect(function() self.hovering = true end)
+	self.frame.MouseLeave:Connect(function() self.hovering = false end)
+
 	return self
 end
 
@@ -214,8 +220,17 @@ function Popup:accept(index)
 	box.Text = head .. insert .. tail
 	local caret = self.from + (item.caret or #insert)
 	box.CursorPosition = caret
+
+	-- Offering the list again here would just propose the word that was
+	-- accepted, so it stays shut until the text changes again.
+	self.suppressText = box.Text
+
+	local callback = self.onAccept
 	self:hide()
-	if self.onAccept then self.onAccept(box) end
+	if callback then callback(box) end
+	if not box:IsFocused() then
+		task.defer(function() box:CaptureFocus() end)
+	end
 	return true
 end
 
@@ -326,19 +341,35 @@ local function makeTextField(view, block, def, field, value)
 		if view.editing ~= box then return end
 		local cursor = box.CursorPosition or -1
 		if cursor < 0 then return end
-		local result = i.complete({
-			text = box.Text, cursor = cursor, doc = app.doc, field = field,
-		})
-		result.cursor = cursor
+
 		local signature = nil
 		if field.kind == "expr" or field.kind == "multiline" then
 			signature = i.signature(box.Text, cursor, app.doc)
 		end
+
+		-- Straight after an accept, show the signature and nothing else; the
+		-- next keystroke changes the text and brings the list back.
+		if pop.suppressText == box.Text then
+			if signature then
+				pop:show(box, { items = {}, from = cursor, cursor = cursor },
+					signature, box)
+			else
+				pop:hide()
+			end
+			return
+		end
+
+		local result = i.complete({
+			text = box.Text, cursor = cursor, doc = app.doc, field = field,
+		})
+		result.cursor = cursor
 		pop:show(box, result, signature, box)
 	end
 
 	box.Focused:Connect(function()
-		before = app:mark()
+		-- One editing session is one undo step, even if focus bounces to the
+		-- completion list and back in the middle of it.
+		if not before then before = app:mark() end
 		view.editing = box
 		view.refreshCompletion = refreshCompletion
 		-- the popup is shared, so it learns who it is serving on focus
@@ -346,19 +377,7 @@ local function makeTextField(view, block, def, field, value)
 			if target ~= box then return end
 			block.f[field.key] = box.Text
 			app:emit("codeDirty")
-			-- Reopening the whole list here would just offer back the word that
-			-- was accepted; what is useful after taking a method is its
-			-- signature, so show that alone and let typing bring the list back.
-			task.defer(function()
-				if view.editing ~= box then return end
-				local cursor = box.CursorPosition or -1
-				if cursor < 0 then return end
-				local signature = i.signature(box.Text, cursor, app.doc)
-				if signature then
-					pop:show(box, { items = {}, from = cursor, cursor = cursor },
-						signature, box)
-				end
-			end)
+			task.defer(refreshCompletion)
 		end
 		app:select(block.id)
 		refreshCompletion()
@@ -373,6 +392,17 @@ local function makeTextField(view, block, def, field, value)
 	box:GetPropertyChangedSignal("CursorPosition"):Connect(refreshCompletion)
 
 	box.FocusLost:Connect(function(enterPressed)
+		-- The click landed on the completion list, not away from the field:
+		-- leave everything as it is and take focus back.
+		if pop.textBox == box and pop.hovering then
+			task.defer(function()
+				if view.editing == box and not box:IsFocused() then
+					box:CaptureFocus()
+				end
+			end)
+			return
+		end
+
 		if enterPressed and pop.open and pop.textBox == box then
 			pop:accept()
 			block.f[field.key] = box.Text
