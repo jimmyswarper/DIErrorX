@@ -153,9 +153,10 @@ local HIERARCHY = {
 	PluginGui = "LayerCollector",
 	DockWidgetPluginGui = "PluginGui",
 	ScreenGui = "LayerCollector",
-	Script = "Instance",
-	LocalScript = "Instance",
-	ModuleScript = "Instance",
+	LuaSourceContainer = "Instance",
+	Script = "LuaSourceContainer",
+	LocalScript = "LuaSourceContainer",
+	ModuleScript = "LuaSourceContainer",
 	Folder = "Instance",
 }
 
@@ -195,6 +196,7 @@ local EVENTS = {
 	InputBegan = true, InputEnded = true, InputChanged = true,
 	Focused = true, FocusLost = true, Changed = true, Destroying = true,
 	ChildAdded = true, ChildRemoved = true, Activated = true,
+	SelectionChanged = true,
 	WindowFocused = true, WindowFocusReleased = true, Click = true,
 	Unloading = true, Heartbeat = true, RenderStepped = true,
 }
@@ -206,6 +208,7 @@ local DEFAULTS = {
 	Transparency = 0, Thickness = 1, Scale = 1, CursorPosition = -1,
 	SelectionStart = -1, TextSize = 14, BorderSizePixel = 1,
 	Archivable = true, Enabled = false, Active = false,
+	Position = UDim2.new(), Size = UDim2.new(), AnchorPoint = Vector2.new(0, 0),
 }
 
 local proxyData = setmetatable({}, { __mode = "k" })
@@ -323,6 +326,16 @@ end
 
 function METHODS:GetRelativeMousePosition()
 	return MOCK_MOUSE
+end
+
+function METHODS:GetFullName()
+	local pieces = { proxyData[self].properties.Name }
+	local parent = proxyData[self].properties.Parent
+	while parent and parent ~= game do
+		table.insert(pieces, 1, proxyData[parent].properties.Name)
+		parent = proxyData[parent].properties.Parent
+	end
+	return table.concat(pieces, ".")
 end
 
 function METHODS:IsDescendantOf(other)
@@ -715,8 +728,15 @@ METHODS.TryBeginRecording = function() return "recording" end
 METHODS.FinishRecording = function() return true end
 METHODS.SetWaypoint = function() end
 
-service("Selection")
-METHODS.Set = function() end
+local SelectionService = service("Selection")
+MOCK_SELECTION = {}
+METHODS.Set = function(_, instances)
+	MOCK_SELECTION = instances or {}
+	MOCK.fire(SelectionService, "SelectionChanged")
+end
+METHODS.Get = function()
+	return MOCK_SELECTION
+end
 
 local UserInputService = service("UserInputService")
 METHODS.GetFocusedTextBox = function()
@@ -755,8 +775,14 @@ function DockWidgetPluginGuiInfo.new(...)
 	return { args = table.pack(...) }
 end
 
+-- Selects instances in the mock Explorer, firing SelectionChanged as Studio does.
+function MOCK.select(instances)
+	MOCK_SELECTION = instances or {}
+	MOCK.fire(SelectionService, "SelectionChanged")
+end
+
 function MOCK.newPlugin()
-	local pluginInstance = makeInstance("Plugin", "DIErrorX")
+	local pluginInstance = makeInstance("Plugin", "ABlocks")
 	local settings = {}
 	local widgets = {}
 

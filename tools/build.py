@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
-"""Build DIErrorX.rbxmx from src/, for installing without Rojo.
+"""Build ABlocks.rbxmx from src/, for installing without Rojo.
 
-    python3 tools/build.py [--out dist/DIErrorX.rbxmx]
+    python3 tools/build.py [--out dist/ABlocks.rbxmx]
 
 The result is a model file containing one Script (the plugin) with the lettered
-ModuleScripts inside it.  dist/DIErrorX.rbxmx is committed so the plugin can be
+ModuleScripts inside it.  dist/ABlocks.rbxmx is committed so the plugin can be
 installed without any tooling at all; tools/test.sh checks it is still current.  Drop it in your Studio plugins folder, or right-click
 it in Studio and choose "Save as Local Plugin".
 """
@@ -42,7 +42,7 @@ def item(class_name: str, name: str, source: str, referent: int, children: str =
 
 def main() -> int:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--out", default=str(ROOT / "dist" / "DIErrorX.rbxmx"))
+    parser.add_argument("--out", default=str(ROOT / "dist" / "ABlocks.rbxmx"))
     args = parser.parse_args()
 
     entry = SRC / ENTRY
@@ -64,7 +64,7 @@ def main() -> int:
         'xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" '
         'xsi:noNamespaceSchemaLocation="http://www.roblox.com/roblox.xsd" '
         'version="4">\n'
-        + item("Script", "DIErrorX", entry.read_text(), 0, "".join(children))
+        + item("Script", "ABlocks", entry.read_text(), 0, "".join(children))
         + "</roblox>\n"
     )
 

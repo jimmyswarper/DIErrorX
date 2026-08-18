@@ -1,9 +1,9 @@
 --!nonstrict
 -- p  ·  the window
 --
--- Rail on the left, top bar, status bar, and one of four workspaces in the
--- middle.  The rail labels run vertically, which is the one bit of chrome that
--- gives the plugin its own silhouette in a Studio full of horizontal tabs.
+-- Tabs across the top, work in the middle, actions along the bottom.  The
+-- bottom bar is where the plugin's two real verbs live -- write the script out,
+-- and undo -- so they sit in the same place whichever tab you are on.
 --
 -- Keyboard handling lives here too, because shortcuts belong to the window
 -- rather than to any one view.
@@ -16,6 +16,7 @@ local k = require(script.Parent.k)
 local l = require(script.Parent.l)
 local m = require(script.Parent.m)
 local n = require(script.Parent.n)
+local o = require(script.Parent.o)
 
 local UserInputService = game:GetService("UserInputService")
 
@@ -24,12 +25,12 @@ local p = {}
 local TABS = {
 	{ id = "build", label = "build", hint = "The canvas, the palette and the generated Luau." },
 	{ id = "learn", label = "learn", hint = "Twenty-six lessons, from first block to first script." },
-	{ id = "import", label = "import", hint = "Paste Luau and get blocks back." },
-	{ id = "setup", label = "setup", hint = "Projects, theme and keyboard shortcuts." },
+	{ id = "import", label = "import", hint = "Turn a script you have selected into blocks." },
+	{ id = "setup", label = "setup", hint = "Projects, where scripts go, theme, shortcuts." },
 }
 
 --=============================================================================
--- chrome
+-- top bar: wordmark, tabs, project name
 --=============================================================================
 
 local function topBar(app, parent, shell)
@@ -41,15 +42,90 @@ local function topBar(app, parent, shell)
 	})
 	b.rule({ Position = UDim2.new(0, 0, 1, -1), parent = bar })
 
+	-- a drawn mark rather than an image asset
+	local mark = b.new("Frame", {
+		Size = UDim2.fromOffset(18, a.metric.topBar),
+		Position = UDim2.fromOffset(14, 0),
+		Parent = bar,
+	})
+	for index = 1, 3 do
+		b.new("Frame", {
+			Size = UDim2.fromOffset(14 - (index - 1) * 4, 2),
+			Position = UDim2.fromOffset(0, 15 + (index - 1) * 5),
+			bg = index == 1 and "accent" or "text3",
+			BackgroundTransparency = index == 1 and 0 or 0.4,
+			Parent = mark,
+		})
+	end
+
+	b.text({
+		Text = "ABlocks",
+		Size = UDim2.fromOffset(70, a.metric.topBar),
+		Position = UDim2.fromOffset(38, 0),
+		Font = a.font.uiBold,
+		TextSize = 13,
+		fg = "text2",
+		Parent = bar,
+	})
+	b.tip(mark, "ABlocks -- blocks in, Luau out.")
+
+	local tabs = {}
+	local tabStrip = b.new("Frame", {
+		Size = UDim2.new(0, #TABS * 84, 1, 0),
+		Position = UDim2.fromOffset(124, 0),
+		layout = { dir = "x", gap = 0 },
+		Parent = bar,
+	})
+
+	for index, tab in ipairs(TABS) do
+		local button = b.new("TextButton", {
+			Size = UDim2.fromOffset(84, a.metric.topBar),
+			LayoutOrder = index,
+			bg = "panel",
+			Parent = tabStrip,
+		})
+
+		local label = b.text({
+			Text = string.upper(tab.label),
+			Size = UDim2.fromScale(1, 1),
+			Font = a.font.uiBold,
+			TextSize = 11,
+			fg = "text3",
+			TextXAlignment = Enum.TextXAlignment.Center,
+			Parent = button,
+		})
+
+		-- the active tab is marked by a rule under it, not by a filled shape
+		local marker = b.new("Frame", {
+			Size = UDim2.new(1, 0, 0, 2),
+			Position = UDim2.new(0, 0, 1, -2),
+			bg = "accent",
+			Visible = false,
+			ZIndex = 3,
+			Parent = button,
+		})
+
+		b.tip(button, tab.hint)
+		button.MouseButton1Click:Connect(function() shell.showTab(tab.id) end)
+		b.hover(button, function()
+			if shell.tab ~= tab.id then label.TextColor3 = a.c.text2 end
+		end, function()
+			if shell.tab ~= tab.id then label.TextColor3 = a.c.text3 end
+		end)
+
+		tabs[tab.id] = { button = button, label = label, marker = marker }
+	end
+
 	-- project name, editable in place
 	local nameBox = b.new("TextBox", {
 		Text = app.doc.name,
 		PlaceholderText = "project name",
 		ClearTextOnFocus = false,
 		Size = UDim2.fromOffset(220, 24),
-		Position = UDim2.fromOffset(14, 8),
+		Position = UDim2.new(1, -276, 0, 10),
 		Font = a.font.uiBold,
-		TextSize = 14,
+		TextSize = 13,
+		TextXAlignment = Enum.TextXAlignment.Right,
 		fg = "text",
 		ph = "text3",
 		Parent = bar,
@@ -64,38 +140,78 @@ local function topBar(app, parent, shell)
 		if not nameBox:IsFocused() then nameBox.Text = app.doc.name end
 	end)
 
-	local actions = b.new("Frame", {
-		Size = UDim2.new(1, -260, 1, 0),
-		Position = UDim2.fromOffset(250, 0),
+	local themeButton = b.new("TextButton", {
+		Size = UDim2.fromOffset(34, a.metric.topBar),
+		Position = UDim2.new(1, -44, 0, 0),
+		bg = "panel",
+		Parent = bar,
+	})
+	local themeMark = b.new("Frame", {
+		Size = UDim2.fromOffset(12, 12),
+		Position = UDim2.fromOffset(11, 16),
+		bg = "text2",
+		radius = 6,
+		Parent = themeButton,
+	})
+	b.new("Frame", {
+		Size = UDim2.fromOffset(6, 12),
+		bg = "panel",
+		Parent = themeMark,
+	})
+	b.tip(themeButton, "Switch between the ink and paper themes.")
+	themeButton.MouseButton1Click:Connect(function()
+		local name = a.toggleTheme()
+		app:setSetting("theme", name)
+		app:setStatus(name .. " theme")
+	end)
+
+	return bar, tabs
+end
+
+--=============================================================================
+-- bottom: actions, then a thin status strip
+--=============================================================================
+
+local function actionBar(app, parent, shell)
+	local bar = b.new("Frame", {
+		Name = "ActionBar",
+		Size = UDim2.new(1, 0, 0, a.metric.actionBar),
+		Position = UDim2.new(0, 0, 1, -a.metric.actionBar - a.metric.statusBar),
+		bg = "panel",
+		Parent = parent,
+	})
+	b.rule({ parent = bar })
+
+	local left = b.new("Frame", {
+		Size = UDim2.new(0.5, 0, 1, 0),
+		Position = UDim2.fromOffset(12, 0),
 		layout = { dir = "x", gap = 6, align = "middle" },
 		Parent = bar,
 	})
 
-	local buttons = {}
-	local function action(label, hint, order, onClick, accent)
+	local function action(parentFrame, label, hint, order, onClick, accent)
 		local button = b.button({
 			label = label,
-			Size = UDim2.fromOffset(#label * 8 + 26, 24),
+			Size = UDim2.fromOffset(#label * 8 + 24, 26),
 			LayoutOrder = order,
 			bg = accent and "accent" or "raised",
 			labelColor = accent and "accentInk" or "text",
-			Parent = actions,
+			Parent = parentFrame,
 		})
 		b.tip(button, hint)
 		button.MouseButton1Click:Connect(onClick)
-		buttons[#buttons + 1] = button
 		return button
 	end
 
-	local undo = action("undo", "Ctrl+Z", 1, function() app:undo() end)
-	local redo = action("redo", "Ctrl+Y", 2, function() app:redo() end)
-	action("tidy", "Line every stack up in a column.  Ctrl+L", 3, function()
+	local undo = action(left, "undo", "Ctrl+Z", 1, function() app:undo() end)
+	local redo = action(left, "redo", "Ctrl+Y", 2, function() app:redo() end)
+	action(left, "tidy", "Line every stack up in a column.  Ctrl+L", 3, function()
 		if app.canvas then app.canvas:tidy() end
 	end)
-	action("100%", "Zoom back to 100%.  Ctrl+0", 4, function()
+	action(left, "100%", "Zoom back to 100%.  Ctrl+0", 4, function()
 		if app.canvas then app.canvas:resetZoom() end
 	end)
-	action("save", "Save this project.  Ctrl+S", 5, function() app:save() end)
+	action(left, "save", "Save this project.  Ctrl+S", 5, function() app:save() end)
 
 	local function paintHistory()
 		undo:SetAttribute("disabled", not app:canUndo())
@@ -106,18 +222,90 @@ local function topBar(app, parent, shell)
 	app:on("doc", paintHistory)
 	paintHistory()
 
+	-- right hand side: what kind of script, and writing it out
+	local right = b.new("Frame", {
+		Size = UDim2.new(0, 420, 1, 0),
+		Position = UDim2.new(1, -432, 0, 0),
+		Parent = bar,
+	})
+	b.new("UIListLayout", {
+		FillDirection = Enum.FillDirection.Horizontal,
+		HorizontalAlignment = Enum.HorizontalAlignment.Right,
+		VerticalAlignment = Enum.VerticalAlignment.Center,
+		Padding = UDim.new(0, 6),
+		SortOrder = Enum.SortOrder.LayoutOrder,
+		Parent = right,
+	})
+
+	local kindButton = b.button({
+		label = app:scriptKind(),
+		Size = UDim2.fromOffset(110, 26),
+		LayoutOrder = 1,
+		Parent = right,
+	})
+	local kindLabel = kindButton:FindFirstChildWhichIsA("TextLabel")
+	kindButton.MouseButton1Click:Connect(function()
+		local at = table.find(o.KINDS, app:scriptKind()) or 0
+		app:setScriptKind(o.KINDS[(at % #o.KINDS) + 1])
+	end)
+
+	local copy = b.button({
+		label = "copy",
+		Size = UDim2.fromOffset(64, 26),
+		LayoutOrder = 2,
+		Parent = right,
+	})
+	b.tip(copy, "Studio gives plugins no clipboard, so this opens the code\n" ..
+		"selected and ready for Ctrl+C.")
+	copy.MouseButton1Click:Connect(function()
+		n.textModal("generated luau", shell.code and shell.code.code or "")
+	end)
+
+	local insert = b.button({
+		label = "Insert script",
+		Size = UDim2.fromOffset(170, 26),
+		LayoutOrder = 3,
+		bg = "accent",
+		labelColor = "accentInk",
+		Parent = right,
+	})
+	local insertLabel = insert:FindFirstChildWhichIsA("TextLabel")
+	insert.MouseButton1Click:Connect(function()
+		if shell.code then shell.code:insertScript() end
+	end)
+
+	-- Both the kind and the button follow the document: converting a script
+	-- ties the project to it, and the button then offers to update it.
+	local function paintTarget()
+		kindLabel.Text = app:scriptKind()
+		local tied = app.doc.origin ~= nil
+		b.tip(kindButton, tied
+			and ("This project came from a " .. app:scriptKind() ..
+				".\nChanging it here unties it from that script.")
+			or ("Which kind of script to write.\nA " .. app:scriptKind() ..
+				" goes to " .. app:destinationFor() .. "."))
+		if shell.code then
+			local label, hint = shell.code:insertLabel()
+			insertLabel.Text = label
+			b.tip(insert, hint .. "   Ctrl+Enter")
+		end
+	end
+	app:on("doc", paintTarget)
+	app:on("settings", paintTarget)
+	shell.paintTarget = paintTarget
+
 	return bar
 end
 
-local function statusBar(app, parent)
-	local bar = b.new("Frame", {
-		Name = "StatusBar",
+local function statusStrip(app, parent)
+	local strip = b.new("Frame", {
+		Name = "StatusStrip",
 		Size = UDim2.new(1, 0, 0, a.metric.statusBar),
 		Position = UDim2.new(0, 0, 1, -a.metric.statusBar),
 		bg = "panel",
 		Parent = parent,
 	})
-	b.rule({ parent = bar })
+	b.rule({ parent = strip })
 
 	local message = b.mono({
 		Text = "ready",
@@ -125,17 +313,17 @@ local function statusBar(app, parent)
 		Position = UDim2.fromOffset(12, 0),
 		TextSize = 10,
 		fg = "text3",
-		Parent = bar,
+		Parent = strip,
 	})
 
 	local stats = b.mono({
 		Text = "",
-		Size = UDim2.fromOffset(300, 22),
+		Size = UDim2.fromOffset(300, a.metric.statusBar),
 		Position = UDim2.new(1, -312, 0, 0),
 		TextSize = 10,
 		fg = "text3",
 		TextXAlignment = Enum.TextXAlignment.Right,
-		Parent = bar,
+		Parent = strip,
 	})
 
 	local function paint()
@@ -155,100 +343,7 @@ local function statusBar(app, parent)
 		message.Text = text == "" and "ready" or text
 	end)
 	paint()
-	return bar
-end
-
-local function rail(app, parent, shell)
-	local frame = b.new("Frame", {
-		Name = "Rail",
-		Size = UDim2.new(0, a.metric.rail, 1, 0),
-		bg = "panel",
-		Parent = parent,
-	})
-	b.rule({ Position = UDim2.new(1, -1, 0, 0), vertical = true, parent = frame })
-
-	-- a small drawn mark rather than a logo image
-	local mark = b.new("Frame", {
-		Size = UDim2.fromOffset(a.metric.rail, 40),
-		Parent = frame,
-	})
-	for index = 1, 3 do
-		b.new("Frame", {
-			Size = UDim2.fromOffset(14 - (index - 1) * 4, 2),
-			Position = UDim2.fromOffset(16, 12 + (index - 1) * 5),
-			bg = index == 1 and "accent" or "text3",
-			BackgroundTransparency = index == 1 and 0 or 0.4,
-			Parent = mark,
-		})
-	end
-	b.tip(mark, "DIErrorX -- blocks in, Luau out.")
-
-	local tabs = {}
-	for index, tab in ipairs(TABS) do
-		local button = b.new("TextButton", {
-			Size = UDim2.fromOffset(a.metric.rail, 96),
-			Position = UDim2.fromOffset(0, 40 + (index - 1) * 100),
-			bg = "panel",
-			Parent = frame,
-		})
-
-		local label = b.new("TextLabel", {
-			Text = string.upper(tab.label),
-			Size = UDim2.fromOffset(96, 20),
-			Position = UDim2.fromOffset(-24, 38),
-			Rotation = -90,
-			Font = a.font.uiBold,
-			TextSize = 11,
-			TextXAlignment = Enum.TextXAlignment.Center,
-			BackgroundTransparency = 1,
-			Parent = button,
-		})
-		a.bind(label, "TextColor3", "text3")
-
-		local marker = b.new("Frame", {
-			Size = UDim2.fromOffset(2, 96),
-			bg = "accent",
-			Visible = false,
-			Parent = button,
-		})
-
-		b.tip(button, tab.hint)
-		button.MouseButton1Click:Connect(function() shell.showTab(tab.id) end)
-		b.hover(button, function()
-			if shell.tab ~= tab.id then label.TextColor3 = a.c.text2 end
-		end, function()
-			if shell.tab ~= tab.id then label.TextColor3 = a.c.text3 end
-		end)
-
-		tabs[tab.id] = { button = button, label = label, marker = marker }
-	end
-
-	local themeButton = b.new("TextButton", {
-		Size = UDim2.fromOffset(a.metric.rail, 34),
-		Position = UDim2.new(0, 0, 1, -34),
-		bg = "panel",
-		Parent = frame,
-	})
-	local themeMark = b.new("Frame", {
-		Size = UDim2.fromOffset(12, 12),
-		Position = UDim2.fromOffset(17, 11),
-		bg = "text2",
-		radius = 6,
-		Parent = themeButton,
-	})
-	b.new("Frame", {
-		Size = UDim2.fromOffset(6, 12),
-		bg = "panel",
-		Parent = themeMark,
-	})
-	b.tip(themeButton, "Switch between the ink and paper themes.")
-	themeButton.MouseButton1Click:Connect(function()
-		local name = a.toggleTheme()
-		app:setSetting("theme", name)
-		app:setStatus(name .. " theme")
-	end)
-
-	return frame, tabs
+	return strip
 end
 
 --=============================================================================
@@ -350,7 +445,7 @@ function p.mount(app, widget)
 	local shell = { tab = "build" }
 
 	local rootFrame = b.new("Frame", {
-		Name = "DIErrorX",
+		Name = "ABlocks",
 		Size = UDim2.fromScale(1, 1),
 		bg = "bg",
 		Parent = widget,
@@ -364,23 +459,14 @@ function p.mount(app, widget)
 	})
 	b.setOverlay(overlay)
 
-	local railFrame, tabs = rail(app, rootFrame, shell)
+	local _, tabs = topBar(app, rootFrame, shell)
 
-	local body = b.new("Frame", {
-		Name = "Body",
-		Size = UDim2.new(1, -a.metric.rail, 1, 0),
-		Position = UDim2.fromOffset(a.metric.rail, 0),
-		Parent = rootFrame,
-	})
-
-	topBar(app, body, shell)
-	statusBar(app, body)
-
+	local chrome = a.metric.topBar + a.metric.actionBar + a.metric.statusBar
 	local pages = b.new("Frame", {
 		Name = "Pages",
-		Size = UDim2.new(1, 0, 1, -a.metric.topBar - a.metric.statusBar),
+		Size = UDim2.new(1, 0, 1, -chrome),
 		Position = UDim2.fromOffset(0, a.metric.topBar),
-		Parent = body,
+		Parent = rootFrame,
 	})
 
 	-- build ---------------------------------------------------------------------
@@ -447,6 +533,9 @@ function p.mount(app, widget)
 	shell.import = n.importView(app, pages)
 	shell.setup = n.settingsView(app, pages)
 
+	actionBar(app, rootFrame, shell)
+	statusStrip(app, rootFrame)
+
 	local pageFor = {
 		build = buildPage,
 		learn = shell.learn.frame,
@@ -466,9 +555,16 @@ function p.mount(app, widget)
 			parts.label.TextColor3 = chosen and a.c.text or a.c.text3
 			parts.button.BackgroundColor3 = chosen and a.c.raised or a.c.panel
 		end
+		-- the import tab is only truthful if it re-reads the selection on the
+		-- way in, since the Explorer may have changed while it was hidden
+		if id == "import" and shell.import and shell.import.describe then
+			shell.import.describe()
+		end
 		if id ~= "build" and app.dirty then app:save() end
 	end
 	app.showTab = shell.showTab
+
+	shell.paintTarget()
 	-- First run has no saved project: open on the lessons rather than dropping
 	-- someone straight onto a canvas they have no vocabulary for yet.
 	shell.showTab(app.projectId and "build" or "learn")
@@ -476,8 +572,8 @@ function p.mount(app, widget)
 	keyboard(app, shell)
 
 	a.onChange(function()
-		-- repaint the bits that carry state-dependent colours
 		shell.showTab(shell.tab)
+		shell.paintTarget()
 	end)
 
 	app:setStatus(string.format("%d blocks, %d lessons -- press learn if this is new",

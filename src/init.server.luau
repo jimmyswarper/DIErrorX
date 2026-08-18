@@ -1,5 +1,5 @@
 --!nonstrict
--- DIErrorX  ·  block coding for Roblox Studio
+-- ABlocks  ·  block coding for Roblox Studio
 --
 -- Drag blocks, read the Luau they write, and take the script with you.
 --
@@ -17,7 +17,7 @@
 local o = require(script.o)
 local p = require(script.p)
 
-local TITLE = "DIErrorX"
+local TITLE = "ABlocks"
 
 local toolbar = plugin:CreateToolbar(TITLE)
 local button = toolbar:CreateButton(
@@ -33,9 +33,9 @@ local widgetInfo = DockWidgetPluginGuiInfo.new(
 	1240, 760, -- preferred size
 	920, 520)  -- minimum size
 
-local widget = plugin:CreateDockWidgetPluginGui("DIErrorXMain", widgetInfo)
+local widget = plugin:CreateDockWidgetPluginGui("ABlocksMain", widgetInfo)
 widget.Title = TITLE .. " -- blocks in, Luau out"
-widget.Name = "DIErrorX"
+widget.Name = "ABlocks"
 widget.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
 
 local app = nil

@@ -547,7 +547,9 @@ T{
 		{ p = "The first two lines are a banner with your project name. Below that, any services your blocks need appear as `local Players = game:GetService(\"Players\")` -- hoisted automatically, deduplicated, and skipped entirely if you added the service block yourself." },
 		{ h = "Getting the code out" },
 		{ list = {
-			"`Insert script` puts a real Script into the game, at the parent you choose, and registers a waypoint so Ctrl+Z in Studio undoes it.",
+			"The button along the bottom writes the code into the game, and registers a waypoint so Ctrl+Z in Studio undoes it.",
+			"Where it goes depends on the kind: a Script to ServerScriptService, a LocalScript to StarterPlayerScripts, a ModuleScript to ReplicatedStorage.",
+			"If the project was made by converting a script, that button says `Update` instead, and writes back into the very same script.",
 			"`Copy` opens the script as selectable text, ready for Ctrl+C. Studio gives plugins no clipboard of their own, so nothing here pretends otherwise.",
 			"The script it inserts is ordinary Luau with no dependency on this plugin.",
 		} },
@@ -560,9 +562,10 @@ T{
 T{
 	id = "tip-import", kind = "tip", minutes = 4, level = "build",
 	title = "Turning Luau into blocks",
-	blurb = "Paste a script into the Import tab and get a canvas back.",
+	blurb = "Select a script in the Explorer and get a canvas back.",
 	steps = {
-		{ p = "The Import tab takes Luau -- yours, a friend's, something from a tutorial -- and rebuilds it as blocks. It handles the whole language, including types, string interpolation, `+=`, `continue`, and nested functions." },
+		{ p = "Click a Script, LocalScript or ModuleScript in the Explorer, open the Import tab, and it is sitting there waiting -- name, path, kind and length. One button turns it into blocks. It handles the whole language, including types, string interpolation, `+=`, `continue`, and nested functions." },
+		{ p = "The tab watches your selection, so you can leave it open and click around the Explorer to see what each script would convert into." },
 		{ h = "What you get back" },
 		{ list = {
 			"Events, loops, branches and function definitions become the matching blocks.",
@@ -578,8 +581,13 @@ T{
 		{ h = "Round tripping" },
 		{ p = "Import then export gives back the same code -- that is a rule the importer is built around. A pattern is only matched when the block writes exactly the same line back. `hum.WalkSpeed = 24` becomes a walk-speed block; `hum.JumpPower = 50` deliberately does not, because that block writes two lines." },
 		{ note = "Comments survive. A line comment becomes a note block in the same place; a long comment stays raw." },
-		{ warn = "Importing replaces the canvas. Save your project first if it has anything worth keeping." },
-		{ try = "Paste in a script you already have and see how much of it comes back as real blocks." },
+		{ warn = "Converting replaces the canvas. Save your project first if it has anything worth keeping -- though Ctrl+Z will also bring it back." },
+		{ h = "It remembers where the script came from" },
+		{ p = "Converting ties the project to that script. The button at the bottom of the window changes from `Insert` to `Update`, and writes the code back into the same script rather than making another one beside it. That is the loop worth knowing: select, convert, rearrange, update." },
+		{ p = "Choosing a different script kind by hand unties it again, because a project cannot be both a ModuleScript and the Script it was read from." },
+		{ note = "Studio asks permission the first time a plugin reads or writes script source. Allow it once and both directions work from then on." },
+		{ p = "There is still a paste box further down the tab, for code that is not in your place yet -- something from a tutorial, a friend, or a forum post." },
+		{ try = "Select a script you already have and see how much of it comes back as real blocks." },
 	},
 	example = [[
 local Players = game:GetService("Players")
@@ -920,7 +928,7 @@ T{
 			"You want to search and replace across a program.",
 		} },
 		{ h = "The move" },
-		{ p = "Press Insert script. That is a real Script, ordinary Luau, with no dependency on this plugin. Open it and keep going in text. Nothing is lost and nothing has to be rewritten." },
+		{ p = "Press the button at the bottom of the window. That is a real Script, ordinary Luau, with no dependency on this plugin. Open it and keep going in text. Nothing is lost and nothing has to be rewritten." },
 		{ h = "What carries over" },
 		{ p = "Everything you learned here is Luau, not block-speak. `if`, `for`, `local`, events, functions, tables -- the blocks were labels on the real thing the whole time. The code panel has been showing you the destination since the first block you dragged." },
 		{ h = "What to learn next" },
@@ -930,7 +938,7 @@ T{
 			"Types -- `local x: number` and what Studio does with it.",
 			"The Roblox Creator Documentation, which is genuinely good and searchable.",
 		} },
-		{ note = "You can come back. Import takes text Luau and gives you blocks again, so if a bit of a project is easier to think about visually, paste it in, rearrange, and take the code back out." },
+		{ note = "You can come back. Select the script, convert it, rearrange it visually, and press Update to write it straight back. The round trip is stable, so a script can go through the blocks and come out as the same script." },
 	},
 }
 

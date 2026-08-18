@@ -653,7 +653,7 @@ end
 -- entry point
 --=============================================================================
 
-local BANNER = "built with DIErrorX"
+local BANNER = "built with ABlocks"
 
 -- Drops the two-line banner this plugin writes, so re-importing your own
 -- exported script does not stack up headers.

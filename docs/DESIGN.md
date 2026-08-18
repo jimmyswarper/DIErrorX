@@ -31,10 +31,12 @@ So the reference here is technical drafting and printed manuals:
   20 studs of canvas space and a stronger line every fifth, drawn as offset
   frames repositioned on pan so the count stays constant.
 - **No emoji, anywhere.** Icons are drawn from primitives: the chevron is two
-  rotated hairlines, the category chip is a letter, the rail mark is three
+  rotated hairlines, the category chip is a letter, the wordmark is three
   bars. Nothing depends on a font having a particular glyph.
-- **Vertical rail labels.** Rotated -90°, which gives the window a silhouette
-  you can recognise across a Studio full of horizontal tab strips.
+- **Tabs on top, verbs on the bottom.** Tabs are text with a 2px accent rule
+  under the active one — no pills, no filled shapes. The bottom bar holds the
+  two things you actually do (undo, and write the script out), so they stay put
+  whichever tab you are on, and a thin status strip runs beneath it.
 
 Everything sits on a 4px grid; block rows are 26px so a stack lines up with the
 canvas grid at 100% zoom.

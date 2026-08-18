@@ -14,17 +14,31 @@ local HttpService = game:GetService("HttpService")
 
 local o = {}
 
-local KEY_PROJECTS = "dierrorx.projects.v1"
-local KEY_SETTINGS = "dierrorx.settings.v1"
-local KEY_CURRENT = "dierrorx.current.v1"
+local KEY_PROJECTS = "ablocks.projects.v1"
+local KEY_SETTINGS = "ablocks.settings.v1"
+local KEY_CURRENT = "ablocks.current.v1"
 local HISTORY_LIMIT = 50
+
+-- Where each kind of script belongs.  The first entry is the default, and the
+-- rest are what the Setup tab offers as alternatives.
+o.DESTINATIONS = {
+	Script = { "ServerScriptService", "Workspace", "ServerStorage" },
+	LocalScript = { "StarterPlayer.StarterPlayerScripts", "StarterGui", "ReplicatedFirst" },
+	ModuleScript = { "ReplicatedStorage", "ServerScriptService", "ServerStorage" },
+}
+
+o.KINDS = { "Script", "LocalScript", "ModuleScript" }
 
 local DEFAULT_SETTINGS = {
 	theme = "ink",
 	zoom = 1,
 	autoSave = true,
-	insertParent = "ServerScriptService",
 	scriptKind = "Script",
+	destinations = {
+		Script = "ServerScriptService",
+		LocalScript = "StarterPlayer.StarterPlayerScripts",
+		ModuleScript = "ReplicatedStorage",
+	},
 	showCode = true,
 	banner = true,
 	read = {},
@@ -58,7 +72,7 @@ function App:emit(name, ...)
 	for _, callback in ipairs(self.listeners[name] or {}) do
 		local ok, err = pcall(callback, ...)
 		if not ok then
-			warn("[DIErrorX] listener for '" .. name .. "' failed: " .. tostring(err))
+			warn("[ABlocks] listener for '" .. name .. "' failed: " .. tostring(err))
 		end
 	end
 end
@@ -177,7 +191,7 @@ function App:mutate(label, edit)
 	local before = snapshot(self)
 	local ok, result = pcall(edit, self.doc)
 	if not ok then
-		warn("[DIErrorX] edit '" .. tostring(label) .. "' failed: " .. tostring(result))
+		warn("[ABlocks] edit '" .. tostring(label) .. "' failed: " .. tostring(result))
 		local restored = d.fromSave(before)
 		if restored then self.doc = restored end
 		self:emit("doc")
@@ -411,7 +425,7 @@ function App:importProject(raw)
 	local ok, decoded = pcall(HttpService.JSONDecode, HttpService, raw)
 	if not ok then return false, "that is not valid JSON" end
 	local doc, err = d.fromSave(decoded)
-	if not doc then return false, err or "that is not a DIErrorX project" end
+	if not doc then return false, err or "that is not a ABlocks project" end
 	self:setDoc(doc, "import project")
 	return true
 end
@@ -424,6 +438,94 @@ function App:setSetting(key, value)
 	self.settings[key] = value
 	writeJson(self.plugin, KEY_SETTINGS, self.settings)
 	self:emit("settings", key, value)
+end
+
+--=============================================================================
+-- the script this project belongs to
+--=============================================================================
+
+-- "ServerScriptService.Main" -> the instance, or nil if it has gone.
+function o.resolvePath(path)
+	if type(path) ~= "string" or path == "" then return nil end
+	local target = game
+	for piece in string.gmatch(path, "[^%.]+") do
+		if piece ~= "game" then
+			local ok, child = pcall(function()
+				if target == game then
+					return game:FindFirstChild(piece) or game:GetService(piece)
+				end
+				return target:FindFirstChild(piece)
+			end)
+			if not ok or not child then return nil end
+			target = child
+		end
+	end
+	return target ~= game and target or nil
+end
+
+-- Remembers which script in the place this project was read out of, so the
+-- code can be written back to it instead of piling up new copies.
+function App:setOrigin(instance)
+	if not instance then
+		self.doc.origin = nil
+		self:emit("doc")
+		return
+	end
+	self.doc.origin = {
+		kind = instance.ClassName,
+		path = instance:GetFullName(),
+		name = instance.Name,
+	}
+	self.dirty = true
+	-- the window's write-out button reads this, so it has to hear about it
+	self:emit("doc")
+end
+
+-- The originating script, if it still exists and is still a script.
+function App:originInstance()
+	local origin = self.doc.origin
+	if not origin then return nil end
+	local instance = o.resolvePath(origin.path)
+	if instance and instance:IsA("LuaSourceContainer") then return instance end
+	return nil
+end
+
+-- What kind of script this project is heading for: whatever it came from, or
+-- whatever was chosen by hand.
+function App:scriptKind()
+	local origin = self.doc.origin
+	if origin and origin.kind then return origin.kind end
+	return self.settings.scriptKind or "Script"
+end
+
+function App:setScriptKind(kind)
+	-- Choosing a kind by hand means this is no longer tied to the script it was
+	-- read from, so the two cannot disagree.
+	if self.doc.origin and self.doc.origin.kind ~= kind then
+		self.doc.origin = nil
+	end
+	self:setSetting("scriptKind", kind)
+	self:emit("doc")
+end
+
+-- Where a script of this kind should be put.
+function App:destinationFor(kind)
+	kind = kind or self:scriptKind()
+	local chosen = self.settings.destinations and self.settings.destinations[kind]
+	local options = o.DESTINATIONS[kind] or o.DESTINATIONS.Script
+	for _, option in ipairs(options) do
+		if option == chosen then return chosen end
+	end
+	return options[1]
+end
+
+function App:setDestination(kind, path)
+	local destinations = {}
+	for key, value in pairs(self.settings.destinations or {}) do
+		destinations[key] = value
+	end
+	destinations[kind] = path
+	self:setSetting("destinations", destinations)
 end
 
 --=============================================================================

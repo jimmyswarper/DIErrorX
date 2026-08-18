@@ -15,6 +15,7 @@ local d = require(script.Parent.d)
 local e = require(script.Parent.e)
 local f = require(script.Parent.f)
 local h = require(script.Parent.h)
+local o = require(script.Parent.o)
 
 local ChangeHistoryService = game:GetService("ChangeHistoryService")
 local Selection = game:GetService("Selection")
@@ -220,8 +221,8 @@ function n.codePanel(app, parent)
 	})
 	view.count = b.mono({
 		Text = "",
-		Size = UDim2.new(0, 120, 1, 0),
-		Position = UDim2.new(1, -132, 0, 0),
+		Size = UDim2.new(0, 160, 1, 0),
+		Position = UDim2.new(1, -172, 0, 0),
 		TextSize = 10,
 		fg = "text3",
 		TextXAlignment = Enum.TextXAlignment.Right,
@@ -229,8 +230,37 @@ function n.codePanel(app, parent)
 	})
 	b.rule({ Position = UDim2.new(0, 0, 1, 0), parent = head })
 
+	-- Advice about the script kind this is headed for sits between the header
+	-- and the code, where it is impossible to miss and costs no space when
+	-- there is nothing to say.
+	view.advice = b.new("Frame", {
+		Size = UDim2.new(1, 0, 0, 0),
+		Position = UDim2.fromOffset(0, 34),
+		AutomaticSize = Enum.AutomaticSize.Y,
+		bg = "err",
+		Visible = false,
+		Parent = view.frame,
+	})
+	view.adviceText = b.text({
+		Text = "",
+		Size = UDim2.new(1, -16, 0, 0),
+		Position = UDim2.fromOffset(14, 0),
+		AutomaticSize = Enum.AutomaticSize.Y,
+		TextWrapped = true,
+		TextYAlignment = Enum.TextYAlignment.Top,
+		TextSize = 11,
+		LineHeight = 1.25,
+		fg = "text2",
+		bg = "panel",
+		Parent = view.advice,
+	})
+	b.new("UIPadding", {
+		PaddingTop = UDim.new(0, 6), PaddingBottom = UDim.new(0, 6),
+		PaddingLeft = UDim.new(0, 4), PaddingRight = UDim.new(0, 4),
+		Parent = view.adviceText })
+
 	view.scroll = b.new("ScrollingFrame", {
-		Size = UDim2.new(1, 0, 1, -34 - 40),
+		Size = UDim2.new(1, 0, 1, -34),
 		Position = UDim2.fromOffset(0, 34),
 		bg = "sunken",
 		AutomaticCanvasSize = Enum.AutomaticSize.XY,
@@ -244,55 +274,6 @@ function n.codePanel(app, parent)
 	b.new("UIPadding", {
 		PaddingTop = UDim.new(0, 8), PaddingBottom = UDim.new(0, 16),
 		Parent = view.scroll })
-
-	-- actions ------------------------------------------------------------------
-	local bar = b.new("Frame", {
-		Size = UDim2.new(1, 0, 0, 40),
-		Position = UDim2.new(0, 0, 1, -40),
-		bg = "panel",
-		Parent = view.frame,
-	})
-	b.rule({ parent = bar })
-
-	local insert = b.button({
-		label = "Insert script",
-		Size = UDim2.fromOffset(112, 26),
-		Position = UDim2.fromOffset(12, 7),
-		bg = "accent",
-		labelColor = "accentInk",
-		Parent = bar,
-	})
-	insert.MouseButton1Click:Connect(function() view:insertScript() end)
-
-	local copy = b.button({
-		label = "Copy",
-		Size = UDim2.fromOffset(70, 26),
-		Position = UDim2.fromOffset(132, 7),
-		Parent = bar,
-	})
-	copy.MouseButton1Click:Connect(function()
-		n.textModal("generated luau", view.code or "")
-	end)
-
-	view.kindButton = b.button({
-		label = app.settings.scriptKind,
-		Size = UDim2.fromOffset(96, 26),
-		Position = UDim2.new(1, -108, 0, 7),
-		Parent = bar,
-	})
-	view.kindButton.MouseButton1Click:Connect(function()
-		local order = { "Script", "LocalScript", "ModuleScript" }
-		local at = 1
-		for index, kind in ipairs(order) do
-			if kind == app.settings.scriptKind then at = index end
-		end
-		local nextKind = order[(at % #order) + 1]
-		app:setSetting("scriptKind", nextKind)
-		view.kindButton:FindFirstChildWhichIsA("TextLabel").Text = nextKind
-		app:setStatus("will insert a " .. nextKind)
-	end)
-	b.tip(view.kindButton, "Which kind of script to insert. Server logic wants a\n" ..
-		"Script; input and interface want a LocalScript.")
 
 	app:on("doc", function() view:refresh() end)
 	app:on("codeDirty", function() view:queueRefresh() end)
@@ -319,9 +300,10 @@ function Code:refresh()
 	self.refreshToken = (self.refreshToken or 0) + 1
 	local app = self.app
 	local code, meta = e.generate(app.doc, { header = app.settings.banner })
+	local kindNow = app:scriptKind()
 	self.code = code
 	self.meta = meta
-	self.count.Text = meta.lineCount .. " lines"
+	self.count.Text = kindNow .. "   " .. meta.lineCount .. " lines"
 
 	b.clear(self.scroll)
 	self.lineFrames = {}
@@ -338,6 +320,8 @@ function Code:refresh()
 		})
 		return
 	end
+
+	self:showAdvice(e.advise(code, kindNow))
 
 	local lines = n.highlight(code)
 	for index, rich in ipairs(lines) do
@@ -393,6 +377,31 @@ function Code:refresh()
 	self:highlightBlock(self.app.hover)
 end
 
+-- Shows the strip only when there is something to say.
+function Code:showAdvice(notes)
+	if #notes == 0 then
+		self.advice.Visible = false
+		self.scroll.Position = UDim2.fromOffset(0, 34)
+		self.scroll.Size = UDim2.new(1, 0, 1, -34)
+		return
+	end
+
+	local lines = {}
+	for _, note in ipairs(notes) do
+		lines[#lines + 1] = note.text
+	end
+	self.adviceText.Text = table.concat(lines, "\n")
+	self.advice.Visible = true
+
+	-- The strip auto-sizes, so the code area is repositioned once it has.
+	task.defer(function()
+		if not self.advice.Visible then return end
+		local height = self.advice.AbsoluteSize.Y
+		self.scroll.Position = UDim2.fromOffset(0, 34 + height)
+		self.scroll.Size = UDim2.new(1, 0, 1, -34 - height)
+	end)
+end
+
 function Code:highlightBlock(blockId)
 	for _, entry in pairs(self.lineFrames) do
 		if entry.frame.Parent then
@@ -402,44 +411,45 @@ function Code:highlightBlock(blockId)
 	end
 end
 
-local PARENTS = {
-	Script = { "ServerScriptService", "Workspace", "ServerStorage" },
-	LocalScript = { "StarterPlayer.StarterPlayerScripts", "StarterGui", "ReplicatedFirst" },
-	ModuleScript = { "ReplicatedStorage", "ServerScriptService", "ServerStorage" },
-}
+--=============================================================================
+-- writing the script out
+--
+-- Where the code goes is decided by what kind of script it is, and whether
+-- this project was read out of a script that is still there.  Reading a
+-- script's Source and writing it back both need Studio's script-injection
+-- permission, so both are wrapped and explained rather than left to fail
+-- silently.
+--=============================================================================
 
-local function resolveParent(path)
-	local target = game
-	for piece in string.gmatch(path, "[^%.]+") do
-		local ok, child = pcall(function()
-			return target:FindFirstChild(piece) or game:GetService(piece)
-		end)
-		if not ok or not child then return nil end
-		target = child
-	end
-	return target
-end
-
+-- Writes back into the script this project came from, when it still exists;
+-- otherwise makes a new one where that kind of script belongs.
 function Code:insertScript()
 	local app = self.app
-	local kind = app.settings.scriptKind
-	local wanted = app.settings.insertParent
-	local parent = resolveParent(wanted)
-	if not parent or not table.find(PARENTS[kind] or {}, wanted) then
-		parent = resolveParent(PARENTS[kind][1])
-	end
-	if not parent then
-		app:setStatus("could not find somewhere to put it")
-		return
-	end
+	local kind = app:scriptKind()
+	local existing = app:originInstance()
 
-	local recording = ChangeHistoryService:TryBeginRecording("DIErrorX insert")
+	local recording = ChangeHistoryService:TryBeginRecording(
+		existing and "ABlocks update" or "ABlocks insert")
+
 	local ok, err = pcall(function()
+		if existing then
+			existing.Source = self.code
+			Selection:Set({ existing })
+			return existing
+		end
+
+		local parentPath = app:destinationFor(kind)
+		local parent = o.resolvePath(parentPath)
+		if not parent then
+			error("could not find " .. parentPath, 0)
+		end
+
 		local made = Instance.new(kind)
 		made.Name = app.doc.name
 		made.Source = self.code
 		made.Parent = parent
 		Selection:Set({ made })
+		app:setOrigin(made)
 		return made
 	end)
 
@@ -450,18 +460,64 @@ function Code:insertScript()
 	end
 
 	if ok then
-		app:setStatus("inserted " .. kind .. " into " .. parent.Name)
-	else
-		app:setStatus("Studio refused: allow script injection for this plugin")
-		n.textModal("could not write the script", tostring(err),
-			"Studio asks permission before a plugin may write script source.\n" ..
-			"Look for the prompt, or allow it in Plugin Management, then try again.")
+		if existing then
+			app:setStatus("updated " .. existing:GetFullName())
+		else
+			app:setStatus("inserted a " .. kind .. " into " .. app:destinationFor(kind))
+		end
+		app:emit("doc")
+		return true
 	end
+
+	app:setStatus("Studio would not let the plugin write that script")
+	n.textModal("could not write the script", tostring(err),
+		"Studio asks permission before a plugin may read or write script " ..
+		"source.\nLook for the prompt, or allow it in Plugins -> Manage " ..
+		"Plugins, then try again.")
+	return false
+end
+
+-- What the button should say and do next, for the window's bottom bar.
+function Code:insertLabel()
+	local existing = self.app:originInstance()
+	if existing then
+		return "Update " .. b.truncate(existing.Name, 18),
+			"Writes this code back into " .. existing:GetFullName() .. "."
+	end
+	local kind = self.app:scriptKind()
+	return "Insert " .. kind,
+		"Creates a new " .. kind .. " in " .. self.app:destinationFor(kind) .. "."
 end
 
 --=============================================================================
 -- import
 --=============================================================================
+
+local KIND_MARK = {
+	Script = { letter = "S", token = "data", note = "runs on the server" },
+	LocalScript = { letter = "L", token = "text", note = "runs on one player's device" },
+	ModuleScript = { letter = "M", token = "funcs", note = "loaded by other scripts" },
+}
+
+-- The first script among whatever is selected in the Explorer.
+local function selectedScript()
+	local chosen, total = nil, 0
+	for _, instance in ipairs(Selection:Get()) do
+		if instance:IsA("LuaSourceContainer") then
+			total = total + 1
+			chosen = chosen or instance
+		end
+	end
+	return chosen, total
+end
+
+-- Reading Source needs Studio's permission, which is only prompted on a real
+-- attempt, so a failure here is expected rather than exceptional.
+local function readSource(instance)
+	local ok, source = pcall(function() return instance.Source end)
+	if ok then return source end
+	return nil
+end
 
 function n.importView(app, parent)
 	local view = { app = app }
@@ -474,39 +530,245 @@ function n.importView(app, parent)
 		Parent = parent,
 	})
 
-	local column = b.new("Frame", {
-		Size = UDim2.new(1, -80, 1, -40),
-		Position = UDim2.fromOffset(40, 20),
+	local scroll = b.new("ScrollingFrame", {
+		Size = UDim2.new(1, -40, 1, -20),
+		Position = UDim2.fromOffset(20, 10),
+		AutomaticCanvasSize = Enum.AutomaticSize.Y,
 		Parent = view.frame,
 	})
+	local column = b.new("Frame", {
+		Size = UDim2.new(1, -24, 0, 0),
+		AutomaticSize = Enum.AutomaticSize.Y,
+		layout = { dir = "y", gap = 10 },
+		Parent = scroll,
+	})
+	b.new("UISizeConstraint", {
+		MaxSize = Vector2.new(760, math.huge), Parent = column })
+	b.new("UIPadding", { PaddingBottom = UDim.new(0, 40), Parent = column })
 
-	b.micro("paste luau, get blocks", {
+	b.micro("turn a script into blocks", {
 		Size = UDim2.new(1, 0, 0, 18),
 		fg = "accent",
+		LayoutOrder = 1,
 		Parent = column,
 	})
 	b.text({
-		Text = "Anything this converter does not recognise is kept exactly as it was, " ..
-			"in a raw Luau block, so nothing is lost. Importing replaces the canvas.",
-		Size = UDim2.new(1, 0, 0, 34),
-		Position = UDim2.fromOffset(0, 20),
+		Text = "Select a Script, LocalScript or ModuleScript in the Explorer and it " ..
+			"shows up here. Converting replaces the canvas, and the code can be " ..
+			"written straight back into that same script afterwards.",
+		Size = UDim2.new(1, 0, 0, 0),
+		AutomaticSize = Enum.AutomaticSize.Y,
 		TextWrapped = true,
+		TextYAlignment = Enum.TextYAlignment.Top,
 		fg = "text2",
+		LayoutOrder = 2,
+		Parent = column,
+	})
+
+	-- the selection card -------------------------------------------------------
+	local card = b.new("Frame", {
+		Size = UDim2.new(1, 0, 0, 74),
+		bg = "panel",
+		stroke = { color = "line" },
+		LayoutOrder = 3,
+		Parent = column,
+	})
+	view.card = card
+
+	local chipHolder = b.new("Frame", {
+		Size = UDim2.fromOffset(28, 28),
+		Position = UDim2.fromOffset(14, 14),
+		Parent = card,
+	})
+	view.chipHolder = chipHolder
+
+	view.cardName = b.text({
+		Text = "Nothing selected",
+		Size = UDim2.new(1, -180, 0, 20),
+		Position = UDim2.fromOffset(54, 12),
+		Font = a.font.uiBold,
+		TextSize = 14,
+		fg = "text2",
+		Parent = card,
+	})
+	view.cardPath = b.mono({
+		Text = "select a script in the Explorer",
+		Size = UDim2.new(1, -180, 0, 16),
+		Position = UDim2.fromOffset(54, 32),
+		TextSize = 11,
+		fg = "text3",
+		TextTruncate = Enum.TextTruncate.AtEnd,
+		Parent = card,
+	})
+	view.cardFacts = b.mono({
+		Text = "",
+		Size = UDim2.new(1, -70, 0, 14),
+		Position = UDim2.fromOffset(54, 50),
+		TextSize = 10,
+		fg = "text3",
+		Parent = card,
+	})
+
+	local convert = b.button({
+		label = "Convert",
+		Size = UDim2.fromOffset(150, 30),
+		Position = UDim2.new(1, -164, 0, 22),
+		bg = "accent",
+		labelColor = "accentInk",
+		Parent = card,
+	})
+	view.convert = convert
+	local convertLabel = convert:FindFirstChildWhichIsA("TextLabel")
+
+	view.report = b.text({
+		Text = "",
+		Size = UDim2.new(1, 0, 0, 0),
+		AutomaticSize = Enum.AutomaticSize.Y,
+		TextWrapped = true,
+		TextYAlignment = Enum.TextYAlignment.Top,
+		fg = "text2",
+		TextSize = 11,
+		LayoutOrder = 4,
+		Parent = column,
+	})
+
+	--------------------------------------------------------------------------
+	local function describe()
+		local instance, total = selectedScript()
+		view.target = instance
+
+		b.clear(chipHolder)
+		if not instance then
+			view.cardName.Text = "Nothing selected"
+			view.cardName.TextColor3 = a.c.text3
+			view.cardPath.Text = "select a script in the Explorer"
+			view.cardFacts.Text = ""
+			convert:SetAttribute("disabled", true)
+			convertLabel.Text = "Convert"
+			convertLabel.TextTransparency = 0.55
+			local blank = b.chip("?", a.c.text3, 28)
+			blank.Parent = chipHolder
+			return
+		end
+
+		local mark = KIND_MARK[instance.ClassName] or KIND_MARK.Script
+		local chip = b.chip(mark.letter, a.c.cats[mark.token], 28)
+		chip.Parent = chipHolder
+
+		view.cardName.Text = instance.Name
+		view.cardName.TextColor3 = a.c.text
+		view.cardPath.Text = instance:GetFullName()
+
+		local source = readSource(instance)
+		local facts = instance.ClassName .. " -- " .. mark.note
+		if source then
+			local lines = 1
+			for _ in string.gmatch(source, "\n") do lines = lines + 1 end
+			facts = facts .. "   " .. lines .. " lines"
+		else
+			facts = facts .. "   (Studio will ask permission to read it)"
+		end
+		if total > 1 then
+			facts = facts .. "   " .. total .. " scripts selected, this is the first"
+		end
+		view.cardFacts.Text = facts
+
+		convert:SetAttribute("disabled", false)
+		convertLabel.Text = "Convert " .. b.truncate(instance.Name, 14)
+		convertLabel.TextTransparency = 0
+	end
+	view.describe = describe
+
+	--------------------------------------------------------------------------
+	local function convertSource(source, name, instance)
+		if not source or string.match(source, "^%s*$") then
+			view.report.TextColor3 = a.c.text3
+			view.report.Text = "That script is empty."
+			return false
+		end
+
+		local doc, reportData, err = h.fromCode(source, name)
+		if not doc then
+			view.report.TextColor3 = a.c.err
+			view.report.Text = string.format(
+				"Line %d, column %d: %s\n\nThe whole script is read before anything " ..
+				"is built, so the canvas is untouched.", err.line, err.col, err.msg)
+			app:setStatus("could not read that script -- line " .. err.line)
+			return false
+		end
+
+		app:setDoc(doc, "convert " .. name)
+		app:setOrigin(instance)
+		view.report.TextColor3 = a.c.text2
+
+		local lines = {
+			string.format("%d statements became %d blocks across %d stacks.",
+				reportData.total, d.count(doc), reportData.stacks),
+		}
+		if instance then
+			lines[#lines + 1] = "Insert will write back into " ..
+				instance:GetFullName() .. "."
+		end
+		if reportData.raw > 0 then
+			local where = {}
+			for index, note in ipairs(reportData.notes) do
+				if index <= 6 then
+					where[#where + 1] = "line " .. note.line .. " (" .. note.text .. ")"
+				end
+			end
+			lines[#lines + 1] = string.format(
+				"%d kept as raw Luau: %s.", reportData.raw, table.concat(where, ", "))
+		else
+			lines[#lines + 1] = "Every statement matched a block."
+		end
+		view.report.Text = table.concat(lines, "\n")
+		app:setStatus("converted " .. name)
+		if app.showTab then app.showTab("build") end
+		return true
+	end
+	view.convertSource = convertSource
+
+	convert.MouseButton1Click:Connect(function()
+		local instance = view.target
+		if not instance then
+			app:setStatus("select a script in the Explorer first")
+			return
+		end
+		local source = readSource(instance)
+		if not source then
+			view.report.TextColor3 = a.c.err
+			view.report.Text = "Studio would not let the plugin read that script. " ..
+				"Look for the permission prompt, or allow script access in " ..
+				"Plugins -> Manage Plugins, then try again."
+			return
+		end
+		convertSource(source, instance.Name, instance)
+	end)
+
+	Selection.SelectionChanged:Connect(describe)
+	describe()
+
+	-- pasting, for code that is not in the place yet -----------------------------
+	b.spacer(6, 5).Parent = column
+	b.rule({ LayoutOrder = 6, parent = column, bg = "lineSoft" })
+	b.micro("or paste code", {
+		Size = UDim2.new(1, 0, 0, 16),
+		fg = "text3",
+		LayoutOrder = 7,
 		Parent = column,
 	})
 
 	local editor = b.new("ScrollingFrame", {
-		Size = UDim2.new(1, 0, 1, -160),
-		Position = UDim2.fromOffset(0, 62),
+		Size = UDim2.new(1, 0, 0, 220),
 		bg = "sunken",
 		stroke = { color = "line" },
 		AutomaticCanvasSize = Enum.AutomaticSize.Y,
+		LayoutOrder = 8,
 		Parent = column,
 	})
-
 	view.input = b.new("TextBox", {
 		Text = "",
-		PlaceholderText = "-- paste a script here\n\nscript.Parent.Touched:Connect(function(hit)\n\tprint(hit)\nend)",
+		PlaceholderText = "-- paste Luau here if it is not in the place yet",
 		MultiLine = true,
 		ClearTextOnFocus = false,
 		Size = UDim2.new(1, -16, 0, 0),
@@ -520,39 +782,31 @@ function n.importView(app, parent)
 		TextYAlignment = Enum.TextYAlignment.Top,
 		Parent = editor,
 	})
-	b.new("UISizeConstraint", { MinSize = Vector2.new(0, 260), Parent = view.input })
+	b.new("UISizeConstraint", { MinSize = Vector2.new(0, 200), Parent = view.input })
 
-	local report = b.new("Frame", {
-		Size = UDim2.new(1, 0, 0, 56),
-		Position = UDim2.new(0, 0, 1, -90),
+	local pasteRow = b.new("Frame", {
+		Size = UDim2.new(1, 0, 0, 30),
+		layout = { dir = "x", gap = 8 },
+		LayoutOrder = 9,
 		Parent = column,
 	})
-	view.reportText = b.text({
-		Text = "",
-		Size = UDim2.new(1, 0, 1, 0),
-		TextWrapped = true,
-		TextYAlignment = Enum.TextYAlignment.Top,
-		fg = "text2",
-		TextSize = 11,
-		Parent = report,
+	local convertPasted = b.button({
+		label = "Convert pasted code",
+		Size = UDim2.fromOffset(170, 28),
+		LayoutOrder = 1,
+		Parent = pasteRow,
 	})
-
-	local convert = b.button({
-		label = "Convert to blocks",
-		Size = UDim2.fromOffset(150, 28),
-		Position = UDim2.new(0, 0, 1, -32),
-		bg = "accent",
-		labelColor = "accentInk",
-		Parent = column,
-	})
+	view.convertPasted = convertPasted
+	convertPasted.MouseButton1Click:Connect(function()
+		convertSource(view.input.Text, "Pasted", nil)
+	end)
 
 	local sample = b.button({
 		label = "Use a sample",
 		Size = UDim2.fromOffset(120, 28),
-		Position = UDim2.fromOffset(162, 0),
-		Parent = convert.Parent,
+		LayoutOrder = 2,
+		Parent = pasteRow,
 	})
-	sample.Position = UDim2.new(0, 162, 1, -32)
 	sample.MouseButton1Click:Connect(function()
 		view.input.Text = [[
 local Players = game:GetService("Players")
@@ -575,49 +829,7 @@ end)
 ]]
 	end)
 
-	convert.MouseButton1Click:Connect(function()
-		local source = view.input.Text
-		if string.match(source, "^%s*$") then
-			view.reportText.Text = "Nothing to convert yet."
-			view.reportText.TextColor3 = a.c.text3
-			return
-		end
-
-		local doc, reportData, err = h.fromCode(source, app.doc.name)
-		if not doc then
-			view.reportText.TextColor3 = a.c.err
-			view.reportText.Text = string.format(
-				"Line %d, column %d: %s\n\nThe converter reads the whole script before " ..
-				"building anything, so nothing has changed on the canvas.",
-				err.line, err.col, err.msg)
-			app:setStatus("import failed on line " .. err.line)
-			return
-		end
-
-		app:setDoc(doc, "import luau")
-		view.reportText.TextColor3 = a.c.text2
-
-		local lines = {
-			string.format("%d statements converted into %d blocks across %d stacks.",
-				reportData.total, d.count(doc), reportData.stacks),
-		}
-		if reportData.raw > 0 then
-			local where = {}
-			for index, note in ipairs(reportData.notes) do
-				if index <= 6 then
-					where[#where + 1] = "line " .. note.line .. " (" .. note.text .. ")"
-				end
-			end
-			lines[#lines + 1] = string.format(
-				"%d kept as raw Luau: %s.", reportData.raw, table.concat(where, ", "))
-		else
-			lines[#lines + 1] = "Every statement matched a block."
-		end
-		view.reportText.Text = table.concat(lines, "\n")
-		app:setStatus("imported " .. reportData.total .. " statements")
-		if app.showTab then app.showTab("build") end
-	end)
-
+	a.onChange(describe)
 	return view
 end
 
@@ -864,31 +1076,48 @@ function n.settingsView(app, parent)
 		app:setSetting("autoSave", value)
 	end)
 
-	local parentRow = row(behaviour, 3, "Insert into",
-		"Where the Insert script button puts the script.")
-	local parentButton = b.button({
-		label = app.settings.insertParent,
-		Size = UDim2.fromOffset(220, 22),
-		Position = UDim2.new(1, -224, 0, 0),
-		Parent = parentRow,
+	-- where each kind of script goes ------------------------------------------
+	local places = section(column, 4, "where scripts go")
+	b.text({
+		Text = "A new script is put where that kind of script belongs. Click to " ..
+			"cycle through the sensible alternatives.",
+		Size = UDim2.new(1, 0, 0, 28),
+		TextWrapped = true,
+		TextSize = 11,
+		fg = "text3",
+		LayoutOrder = 2,
+		Parent = places,
 	})
-	parentButton.MouseButton1Click:Connect(function()
-		local options = PARENTS[app.settings.scriptKind] or PARENTS.Script
-		local at = table.find(options, app.settings.insertParent) or 0
-		local nextParent = options[(at % #options) + 1]
-		app:setSetting("insertParent", nextParent)
-		parentButton:FindFirstChildWhichIsA("TextLabel").Text = nextParent
-	end)
+
+	for index, kind in ipairs(o.KINDS) do
+		local mark = KIND_MARK[kind]
+		local placeRow = row(places, index + 2, kind, mark and mark.note or nil)
+		local button = b.button({
+			label = app:destinationFor(kind),
+			Size = UDim2.fromOffset(240, 22),
+			Position = UDim2.new(1, -244, 0, 0),
+			Parent = placeRow,
+		})
+		local label = button:FindFirstChildWhichIsA("TextLabel")
+		button.MouseButton1Click:Connect(function()
+			local options = o.DESTINATIONS[kind]
+			local at = table.find(options, app:destinationFor(kind)) or 0
+			local nextPlace = options[(at % #options) + 1]
+			app:setDestination(kind, nextPlace)
+			label.Text = nextPlace
+			app:setStatus(kind .. " goes to " .. nextPlace)
+		end)
+	end
 
 	-- shortcuts ---------------------------------------------------------------------
-	local keys = section(column, 4, "keyboard")
+	local keys = section(column, 5, "keyboard")
 	local list = {
 		{ "Ctrl+Z / Ctrl+Y", "undo, redo" },
 		{ "Delete", "remove the selected block and what follows it" },
 		{ "Ctrl+D", "duplicate the selection" },
 		{ "Ctrl+F", "search the palette" },
 		{ "Ctrl+S", "save the project" },
-		{ "Ctrl+Enter", "insert the script into the game" },
+		{ "Ctrl+Enter", "write the script into the game" },
 		{ "Ctrl+L", "tidy the canvas" },
 		{ "Ctrl+0", "zoom back to 100%" },
 		{ "Ctrl+Space", "open the completion list in a field" },

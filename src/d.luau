@@ -28,6 +28,10 @@ function d.newDoc(name)
 		nextId = 1,
 		blocks = {},
 		stacks = {},
+		-- Where this came from, when it was read out of a script in the place:
+		-- { kind = "Script", path = "ServerScriptService.Main", name = "Main" }.
+		-- Kept so the code can be written straight back where it belongs.
+		origin = nil,
 	}
 end
 
@@ -376,6 +380,7 @@ function d.toSave(doc)
 		format = d.FORMAT,
 		name = doc.name,
 		nextId = doc.nextId,
+		origin = doc.origin,
 		blocks = blocks,
 		stacks = stacks,
 	}
@@ -384,11 +389,18 @@ end
 function d.fromSave(saved)
 	if type(saved) ~= "table" or type(saved.blocks) ~= "table"
 		or type(saved.stacks) ~= "table" then
-		return nil, "that does not look like a DIErrorX project"
+		return nil, "that does not look like a ABlocks project"
 	end
 
 	local doc = d.newDoc(saved.name)
 	doc.nextId = saved.nextId or 1
+	if type(saved.origin) == "table" and saved.origin.kind then
+		doc.origin = {
+			kind = saved.origin.kind,
+			path = saved.origin.path,
+			name = saved.origin.name,
+		}
+	end
 	for _, slim in ipairs(saved.blocks) do
 		if type(slim) == "table" and c.get(slim.k) then
 			doc.blocks[slim.id] = {

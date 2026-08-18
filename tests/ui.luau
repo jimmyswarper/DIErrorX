@@ -21,14 +21,14 @@ end
 
 -- mount ------------------------------------------------------------------------
 local pluginMock = MOCK.newPlugin()
-local widget = pluginMock:CreateDockWidgetPluginGui("DIErrorXTest", DockWidgetPluginGuiInfo.new())
+local widget = pluginMock:CreateDockWidgetPluginGui("ABlocksTest", DockWidgetPluginGuiInfo.new())
 widget.Enabled = true
 local app = o.newApp(pluginMock, widget)
 local shell = p.mount(app, widget)
 MOCK.flush()
 noErrors("mounts without error")
 
-check("window is built", widget:FindFirstChild("DIErrorX") ~= nil)
+check("window is built", widget:FindFirstChild("ABlocks") ~= nil)
 eq("a first run opens on the lessons", shell.tab, "learn")
 shell.showTab("build")
 MOCK.flush()
@@ -253,6 +253,36 @@ eq("the block landed inside the loop", say.p, loop.id)
 eq("it landed in the loop's body", say.ps, "body")
 eq("the canvas is one stack again", #app.doc.stacks, 1)
 
+-- the window's shape: tabs on top, actions along the bottom ---------------------------------
+do
+	local root = widget:FindFirstChild("ABlocks")
+	local top = root:FindFirstChild("TopBar")
+	local actions = root:FindFirstChild("ActionBar")
+	local status = root:FindFirstChild("StatusStrip")
+
+	check("there is a top bar", top ~= nil)
+	check("it sits at the top", top and top.Position.Y.Scale == 0 and top.Position.Y.Offset == 0)
+	for _, name in ipairs({ "BUILD", "LEARN", "IMPORT", "SETUP" }) do
+		check("tab " .. name .. " is in the top bar", MOCK.findText(top, name) ~= nil)
+	end
+
+	check("there is an action bar", actions ~= nil)
+	check("it is anchored to the bottom", actions and actions.Position.Y.Scale == 1
+		and actions.Position.Y.Offset < 0)
+	for _, name in ipairs({ "undo", "redo", "tidy", "save", "copy" }) do
+		check("action " .. name .. " is in the bottom bar",
+			MOCK.findText(actions, name) ~= nil)
+	end
+	check("so is the button that writes the script out",
+		MOCK.findText(actions, "Insert") ~= nil or MOCK.findText(actions, "Update") ~= nil)
+
+	check("the status strip is below the actions", status ~= nil
+		and status.Position.Y.Scale == 1
+		and status.Position.Y.Offset > actions.Position.Y.Offset)
+
+	check("nothing is left of the old side rail", root:FindFirstChild("Rail") == nil)
+end
+
 -- an empty canvas explains itself ------------------------------------------------------
 local emptyDoc = d.newDoc("Nothing")
 app:setDoc(emptyDoc, "empty")
@@ -366,40 +396,133 @@ if buildButton then
 	check("the example became blocks", d.count(app.doc) >= 3, d.count(app.doc))
 end
 
--- import ------------------------------------------------------------------------------------------
+-- converting the script you have selected -------------------------------------------------------
 shell.showTab("import")
-shell.import.input.Text = [[
+MOCK.flush()
+
+local ServerScriptService = game:GetService("ServerScriptService")
+local sourceScript = Instance.new("Script")
+sourceScript.Name = "Trap"
+sourceScript.Source = [[
 local Players = game:GetService("Players")
 
 Players.PlayerAdded:Connect(function(player)
 	print(player.Name)
 end)
 ]]
-local convert = nil
-for _, node in ipairs(shell.import.frame:GetDescendants()) do
-	if node:IsA("TextLabel") and node.Text == "Convert to blocks" then
-		convert = node.Parent
-	end
-end
-check("the import tab has a convert button", convert ~= nil)
-if convert then
-	MOCK.fire(convert, "MouseButton1Click")
-	MOCK.flush()
-	noErrors("importing is clean")
-	check("import produced blocks", d.count(app.doc) >= 3)
-	check("import reported what it did",
-		string.find(shell.import.reportText.Text, "converted", 1, true) ~= nil,
-		shell.import.reportText.Text)
-	check("import switched back to the canvas", shell.tab == "build")
+sourceScript.Parent = ServerScriptService
+
+check("nothing selected is stated plainly",
+	string.find(shell.import.cardName.Text, "Nothing selected", 1, true) ~= nil)
+
+MOCK.select({ sourceScript })
+MOCK.flush()
+noErrors("reacting to a selection is clean")
+eq("the selected script is named", shell.import.cardName.Text, "Trap")
+eq("its path is shown", shell.import.cardPath.Text, "ServerScriptService.Trap")
+check("its kind and size are shown",
+	string.find(shell.import.cardFacts.Text, "Script", 1, true) ~= nil
+	and string.find(shell.import.cardFacts.Text, "lines", 1, true) ~= nil,
+	shell.import.cardFacts.Text)
+
+MOCK.fire(shell.import.convert, "MouseButton1Click")
+MOCK.flush()
+noErrors("converting a selected script is clean")
+check("it became blocks", d.count(app.doc) >= 2, d.count(app.doc))
+eq("the project is tied to that script", app.doc.origin.path, "ServerScriptService.Trap")
+eq("and remembers what kind it was", app.doc.origin.kind, "Script")
+eq("converting switches to the canvas", shell.tab, "build")
+check("the report says what happened",
+	string.find(shell.import.report.Text, "became", 1, true) ~= nil,
+	shell.import.report.Text)
+
+-- writing it back where it came from ----------------------------------------------------------------
+do
+	local actions = widget:FindFirstChild("ABlocks"):FindFirstChild("ActionBar")
+	check("the bottom bar now offers to update the original",
+		MOCK.findText(actions, "Update Trap") ~= nil,
+		"the button label did not follow the conversion")
 end
 
+local label, hint = shell.code:insertLabel()
+check("the button offers to update the original", string.find(label, "Update", 1, true) ~= nil,
+	label)
+check("and says where", string.find(hint, "ServerScriptService.Trap", 1, true) ~= nil, hint)
+
+app.canvas:addBlock("printText")
+MOCK.flush()
+shell.code:insertScript()
+MOCK.flush()
+noErrors("writing back is clean")
+check("the original script was rewritten",
+	string.find(sourceScript.Source, "hello world", 1, true) ~= nil,
+	sourceScript.Source)
+check("no second script appeared",
+	#ServerScriptService:GetChildren() == 1,
+	#ServerScriptService:GetChildren() .. " children")
+
+-- a project with no origin goes where its kind belongs -------------------------------------------------
+app:newProject("Fresh")
+MOCK.flush()
+app.canvas:addBlock("printText")
+MOCK.flush()
+
+eq("a fresh project defaults to a server Script", app:scriptKind(), "Script")
+shell.code:insertScript()
+MOCK.flush()
+noErrors("inserting a new Script is clean")
+eq("it landed in ServerScriptService", #ServerScriptService:GetChildren(), 2)
+
+app:newProject("Client thing")
+app:setScriptKind("LocalScript")
+app.canvas:addBlock("printText")
+MOCK.flush()
+eq("LocalScripts are aimed at StarterPlayerScripts",
+	app:destinationFor("LocalScript"), "StarterPlayer.StarterPlayerScripts")
+eq("ModuleScripts are aimed at ReplicatedStorage",
+	app:destinationFor("ModuleScript"), "ReplicatedStorage")
+
+local starterPlayer = Instance.new("Folder")
+starterPlayer.Name = "StarterPlayer"
+starterPlayer.Parent = game
+local playerScripts = Instance.new("Folder")
+playerScripts.Name = "StarterPlayerScripts"
+playerScripts.Parent = starterPlayer
+
+shell.code:insertScript()
+MOCK.flush()
+noErrors("inserting a LocalScript is clean")
+eq("it landed in StarterPlayerScripts", #playerScripts:GetChildren(), 1)
+eq("as a LocalScript", MOCK.className(playerScripts:GetChildren()[1]), "LocalScript")
+
+-- choosing a kind by hand unties it from the script it came from -----------------------------------------
+MOCK.select({ sourceScript })
+MOCK.flush()
+MOCK.fire(shell.import.convert, "MouseButton1Click")
+MOCK.flush()
+check("tied again after converting", app.doc.origin ~= nil)
+app:setScriptKind("ModuleScript")
+MOCK.flush()
+check("changing kind unties it", app.doc.origin == nil)
+eq("and the kind sticks", app:scriptKind(), "ModuleScript")
+
+-- pasting still works ---------------------------------------------------------------------------------
+shell.showTab("import")
+shell.import.input.Text = "print(1)\n\nprint(2)"
+MOCK.fire(shell.import.convertPasted, "MouseButton1Click")
+MOCK.flush()
+noErrors("pasting is clean")
+eq("pasted code has no origin", app.doc.origin, nil)
+check("pasted code became blocks", d.count(app.doc) == 2, d.count(app.doc))
+
+shell.showTab("import")
 shell.import.input.Text = "if a then"
-MOCK.fire(convert, "MouseButton1Click")
+MOCK.fire(shell.import.convertPasted, "MouseButton1Click")
 MOCK.flush()
 check("a broken paste is reported, not thrown",
-	string.find(shell.import.reportText.Text, "Line", 1, true) ~= nil,
-	shell.import.reportText.Text)
-noErrors("a failed import is clean")
+	string.find(shell.import.report.Text, "Line", 1, true) ~= nil,
+	shell.import.report.Text)
+noErrors("a failed conversion is clean")
 
 -- settings and projects -----------------------------------------------------------------------------
 shell.showTab("setup")
@@ -409,7 +532,7 @@ app:save()
 MOCK.flush()
 check("saving records a project", #app.projects >= math.max(saveCount, 1))
 check("the project went to plugin settings",
-	MOCK.settings["dierrorx.projects.v1"] ~= nil)
+	MOCK.settings["ablocks.projects.v1"] ~= nil)
 
 app:newProject("Second")
 MOCK.flush()

@@ -1,32 +1,34 @@
-# DIErrorX
+# ABlocks
 
 A block coding plugin for Roblox Studio. Drag blocks, read the Luau they write
 in the panel beside them, and take the script with you when you outgrow them.
 
-It also runs backwards: paste an existing Luau script into the Import tab and
-get an editable canvas back.
+It also runs backwards: select a Script, LocalScript or ModuleScript in the
+Explorer and the Import tab turns it into an editable canvas — then writes your
+changes straight back into that same script.
 
 ```
-┌────┬───────────────────────────────────────────────────────────────────┐
-│ B  │  First project            undo  redo  tidy  100%  save            │
-│ U  ├──────────────┬──────────────────────────────┬─────────────────────┤
-│ I  │  / search    │  ▏when script.Parent is      │  1  script.Parent   │
-│ L  │              │  ▏  touched by hit           │  2    .Touched:Conn │
-│ D  │  E Events  13│  ▏  ┌ make hum = the         │  3    local hum = h │
-│    │  C Control 16│  ▏  │   humanoid of hit.Parent│  4    if not hum t │
-│ L  │  ? Logic   12│  ▏  │ stop here unless hum   │  5      return     │
-│ E  │  N Math    11│  ▏  └ teleport hit.Parent to │  6    end          │
-│ A  │  T Text    13│  ▏    (0, 10, 0)             │  7    hit.Parent:P │
-│ R  │  x Vars    10│                              │                     │
-│ N  │  f Funcs    9│                              │  Insert script  Copy│
-├────┴──────────────┴──────────────────────────────┴─────────────────────┤
-│ ready                          14 blocks   3 stacks   saved            │
-└────────────────────────────────────────────────────────────────────────┘
+┌──────────────────────────────────────────────────────────────────────┐
+│ ≡ ABlocks   BUILD  LEARN  IMPORT  SETUP              First project  ◑│
+├──────────────┬───────────────────────────────┬───────────────────────┤
+│ / search     │ ▏when script.Parent is        │ Script      12 lines  │
+│              │ ▏  touched by hit             ├───────────────────────┤
+│ E Events  13 │ ▏  ┌ make hum = the humanoid  │ 1  script.Parent      │
+│ C Control 16 │ ▏  │   of hit.Parent          │ 2    .Touched:Connect │
+│ ? Logic   12 │ ▏  │ stop here unless hum     │ 3    local hum = hit  │
+│ N Math    11 │ ▏  └ teleport hit.Parent to   │ 4    if not hum then  │
+│ T Text    13 │ ▏    (0, 10, 0)               │ 5      return         │
+│ x Vars    10 │                               │ 6    end              │
+├──────────────┴───────────────────────────────┴───────────────────────┤
+│ undo redo tidy 100% save            Script   copy   Update Trap      │
+├──────────────────────────────────────────────────────────────────────┤
+│ converted Trap                     14 blocks  3 stacks  saved 14:02  │
+└──────────────────────────────────────────────────────────────────────┘
 ```
 
 ## Installing
 
-**Without any tooling.** `dist/DIErrorX.rbxmx` is committed, ready to install.
+**Without any tooling.** `dist/ABlocks.rbxmx` is committed, ready to install.
 In Studio: **Plugins → Plugins Folder**, copy the file in, and restart Studio.
 (Or drag it into Studio, right-click the model in the Explorer, and choose
 *Save as Local Plugin*.)
@@ -34,7 +36,7 @@ In Studio: **Plugins → Plugins Folder**, copy the file in, and restart Studio.
 To rebuild it after changing anything in `src/`:
 
 ```sh
-python3 tools/build.py          # rewrites dist/DIErrorX.rbxmx
+python3 tools/build.py          # rewrites dist/ABlocks.rbxmx
 ```
 
 `tools/test.sh` fails if that file has drifted from the source.
@@ -42,16 +44,16 @@ python3 tools/build.py          # rewrites dist/DIErrorX.rbxmx
 **With [Rojo](https://rojo.space).** The repository is a Rojo project already:
 
 ```sh
-rojo build -o DIErrorX.rbxmx    # same file, via Rojo
+rojo build -o ABlocks.rbxmx    # same file, via Rojo
 rojo serve                      # or live-sync while working on it
 ```
 
-A toolbar button called **Blocks** appears under a **DIErrorX** tab. The window
+A toolbar button called **Blocks** appears under an **ABlocks** tab. The window
 is a dock widget, so it can float or snap anywhere in Studio.
 
-The first time you press *Insert script*, Studio will ask whether the plugin may
-edit scripts. It needs that permission to write the generated code into your
-place; nothing else in the plugin touches your game.
+The first time you convert a script or write one out, Studio will ask whether
+the plugin may read and edit script source. It needs that permission for both
+directions; nothing else in the plugin touches your game.
 
 ## What is in it
 
@@ -78,6 +80,33 @@ interpolation, `+=`, `continue`, nested closures. Two rules keep it honest —
 nothing is ever discarded (unrecognised statements are preserved verbatim in raw
 blocks), and a pattern is only matched when the block writes back exactly the
 same code. Import then export is stable, which is checked by tests.
+
+## Working from a script you already have
+
+The Import tab watches your Explorer selection. Click a script and it shows the
+name, its full path, its kind and how long it is; one button converts it.
+
+Converting **ties the project to that script**. The button in the bottom bar
+changes from *Insert Script* to *Update Trap*, and writes the code back into the
+same script rather than leaving a second copy beside it. Select, convert,
+rearrange, update.
+
+A project with no origin goes wherever its kind belongs:
+
+| kind | goes to |
+|---|---|
+| `Script` | `ServerScriptService` |
+| `LocalScript` | `StarterPlayer.StarterPlayerScripts` |
+| `ModuleScript` | `ReplicatedStorage` |
+
+Those are defaults, changeable per kind on the Setup tab. Picking a kind by hand
+unties the project from the script it was read from, since it cannot be both.
+
+The code panel also checks the code against the kind it is headed for: a
+ModuleScript that never returns anything, a LocalScript reaching for
+ServerStorage, a server Script asking for `Players.LocalPlayer`. Rules of thumb
+rather than analysis, but they catch the mistake that costs beginners an
+afternoon.
 
 ## A design decision worth knowing about
 
@@ -114,7 +143,7 @@ Sixteen modules, one letter each, in `src/`:
 | `m` | canvas: rendering, dragging, snapping, zoom, field editing |
 | `n` | code panel, import tab, settings |
 | `o` | application state, undo, projects, saving |
-| `p` | the window: rail, bars, tabs, keyboard |
+| `p` | the window: top tabs, bottom action bar, keyboard |
 
 `src/init.server.luau` is the plugin script itself and does nothing but make the
 toolbar button and hand over to `p`.

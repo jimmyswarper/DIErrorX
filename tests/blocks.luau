@@ -80,6 +80,39 @@ for _, def in ipairs(c.order) do
 	end
 end
 
+-- advice about the script kind the code is headed for ------------------------------
+local function advice(code, kind)
+	local notes = e.advise(code, kind)
+	local text = {}
+	for _, note in ipairs(notes) do text[#text + 1] = note.text end
+	return #notes, table.concat(text, " ")
+end
+
+local count, text = advice("local M = {}\nreturn M", "ModuleScript")
+eq("advice: a module that returns is fine", count, 0)
+
+count, text = advice("local M = {}\nprint(M)", "ModuleScript")
+eq("advice: a module that returns nothing is flagged", count, 1)
+check("advice: and says what to do", string.find(text, "give back", 1, true) ~= nil, text)
+
+count = advice("local M = {}\nreturn M", "Script")
+eq("advice: a Script need not return", count, 0)
+
+count, text = advice('local s = game:GetService("ServerStorage")', "LocalScript")
+eq("advice: server-only code in a LocalScript is flagged", count, 1)
+check("advice: names the reason", string.find(text, "invisible to the client", 1, true) ~= nil,
+	text)
+
+count, text = advice("local me = Players.LocalPlayer", "Script")
+eq("advice: client-only code in a server Script is flagged", count, 1)
+check("advice: names LocalPlayer", string.find(text, "LocalPlayer", 1, true) ~= nil, text)
+
+count = advice("local me = Players.LocalPlayer", "LocalScript")
+eq("advice: the same code in a LocalScript is fine", count, 0)
+
+count = advice('print("hello")', "Script")
+eq("advice: ordinary code says nothing", count, 0)
+
 -- documents survive a save/load round trip ---------------------------------------
 local doc = d.newDoc("Save me")
 local stack = d.newStack(doc, 40, 60)

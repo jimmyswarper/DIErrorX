@@ -29,7 +29,7 @@ done
 echo "suites"
 for suite in tests/*.luau; do
 	case "$(basename "$suite")" in stub.luau) continue ;; esac
-	bundle=$(mktemp /tmp/dierrorx-bundle-XXXXXX.luau)
+	bundle=$(mktemp /tmp/ablocks-bundle-XXXXXX.luau)
 	if ! python3 tools/bundle.py "$suite" > "$bundle"; then
 		echo "  FAIL  $suite (bundling)"
 		fail=1
@@ -40,12 +40,12 @@ for suite in tests/*.luau; do
 done
 
 echo "packaging"
-built=$(mktemp /tmp/dierrorx-build-XXXXXX.rbxmx)
+built=$(mktemp /tmp/ablocks-build-XXXXXX.rbxmx)
 if python3 tools/build.py --out "$built" > /dev/null; then
-	if cmp -s "$built" dist/DIErrorX.rbxmx; then
-		echo "  ok    dist/DIErrorX.rbxmx matches src/"
+	if cmp -s "$built" dist/ABlocks.rbxmx; then
+		echo "  ok    dist/ABlocks.rbxmx matches src/"
 	else
-		echo "  FAIL  dist/DIErrorX.rbxmx is stale -- run: python3 tools/build.py"
+		echo "  FAIL  dist/ABlocks.rbxmx is stale -- run: python3 tools/build.py"
 		fail=1
 	fi
 else

@@ -15,6 +15,7 @@
 
 local c = require(script.Parent.c)
 local d = require(script.Parent.d)
+local g = require(script.Parent.g)
 
 local e = {}
 
@@ -98,7 +99,7 @@ end
 local function emitBlock(w, doc, block)
 	local def = c.get(block.k)
 	if not def then
-		w:line("-- [DIErrorX] unknown block '" .. tostring(block.k) .. "'", block.id)
+		w:line("-- [ABlocks] unknown block '" .. tostring(block.k) .. "'", block.id)
 		return
 	end
 
@@ -184,7 +185,7 @@ function e.generate(doc, opts)
 	local head = {}
 	if opts.header ~= false then
 		head[#head + 1] = "-- " .. (doc.name or "Untitled")
-		head[#head + 1] = "-- built with DIErrorX -- edits here do not travel back to the blocks"
+		head[#head + 1] = "-- built with ABlocks -- edits here do not travel back to the blocks"
 		head[#head + 1] = ""
 	end
 	if #preamble > 0 then
@@ -218,6 +219,71 @@ function e.generate(doc, opts)
 		services = pending,
 		lineCount = #out,
 	}
+end
+
+--=============================================================================
+-- advice
+--
+-- The three script kinds do not run in the same place or at the same time, and
+-- most beginner bugs are a script in the wrong one.  These checks are plain
+-- text searches on the generated code: cheap, and honest about being rules of
+-- thumb rather than analysis.
+--=============================================================================
+
+local CLIENT_ONLY = {
+	{ "Players.LocalPlayer", "LocalPlayer only exists on the client" },
+	{ "UserInputService", "UserInputService only hears input on the client" },
+	{ "RenderStepped", "RenderStepped only fires on the client" },
+	{ ":GetMouse()", "GetMouse only exists on the client" },
+	{ "CurrentCamera", "the camera belongs to one client" },
+}
+
+local SERVER_ONLY = {
+	{ "ServerStorage", "ServerStorage is invisible to the client" },
+	{ "ServerScriptService", "ServerScriptService is invisible to the client" },
+	{ "DataStoreService", "data stores can only be reached from the server" },
+	{ ":Kick(", "only the server can remove a player" },
+	{ ":LoadCharacter()", "only the server can respawn a character" },
+}
+
+local function mentions(code, needle)
+	return string.find(code, needle, 1, true) ~= nil
+end
+
+-- Returns { { level = "warn" | "note", text = "..." }, ... }
+function e.advise(code, kind)
+	local notes = {}
+
+	if kind == "ModuleScript" then
+		local chunk = g.parse(code)
+		local last = chunk and chunk.body[#chunk.body]
+		if chunk and (not last or last.k ~= "return") then
+			notes[#notes + 1] = {
+				level = "warn",
+				text = "A ModuleScript has to hand something back. End with a " ..
+					"`give back` block, or nothing that requires this will get " ..
+					"anything.",
+			}
+		end
+	end
+
+	if kind == "LocalScript" then
+		for _, rule in ipairs(SERVER_ONLY) do
+			if mentions(code, rule[1]) then
+				notes[#notes + 1] = { level = "warn",
+					text = "This is a LocalScript, but " .. rule[2] .. "." }
+			end
+		end
+	elseif kind == "Script" then
+		for _, rule in ipairs(CLIENT_ONLY) do
+			if mentions(code, rule[1]) then
+				notes[#notes + 1] = { level = "warn",
+					text = "This is a server Script, but " .. rule[2] .. "." }
+			end
+		end
+	end
+
+	return notes
 end
 
 -- Just the code for one block and its children, used by tutorials and tooltips.
