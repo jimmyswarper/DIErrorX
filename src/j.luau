@@ -548,7 +548,7 @@ T{
 		{ h = "Getting the code out" },
 		{ list = {
 			"`Insert script` puts a real Script into the game, at the parent you choose, and registers a waypoint so Ctrl+Z in Studio undoes it.",
-			"`Copy` puts the whole script on the clipboard.",
+			"`Copy` opens the script as selectable text, ready for Ctrl+C. Studio gives plugins no clipboard of their own, so nothing here pretends otherwise.",
 			"The script it inserts is ordinary Luau with no dependency on this plugin.",
 		} },
 		{ warn = "Editing the inserted script does not edit your blocks. The arrow only points one way -- blocks to code. If you change the script and then insert again, your edits are overwritten. Edit the blocks, or move to text for good." },
@@ -839,7 +839,7 @@ T{
 			"Export and import move a whole project as JSON text.",
 		} },
 		{ h = "Sharing" },
-		{ p = "`Export project` on the Settings tab puts the whole document on the clipboard as JSON. Anyone with this plugin can paste it into `Import project` and get an identical canvas -- positions, fields, everything." },
+		{ p = "`Export as text` on the Setup tab shows the whole document as JSON, selected and ready to copy. Anyone with this plugin can paste it into `Import project` and get an identical canvas -- positions, fields, everything." },
 		{ note = "The JSON is plain text, so it goes in a Discord message, a gist, or a version-controlled file just as well." },
 		{ h = "Versions" },
 		{ p = "Before a big change, copy the project and give the copy a new name. It costs one click and it is the cheapest insurance there is. Undo is fifty steps deep, but it does not survive closing the window." },

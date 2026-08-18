@@ -129,6 +129,18 @@ eq("search: nonsense returns nothing", #j.search("qzzxvv"), 0)
 check("search: title matches rank first",
 	j.search("shortcuts")[1].id == "tip-shortcuts")
 
+-- numbers quoted in the prose must still be true ---------------------------------------
+for _, entry in ipairs(j.tutorials) do
+	for _, step in ipairs(entry.steps) do
+		local text = step.p or step.note or step.warn or ""
+		local claimed = string.match(text, "There are (%d+) blocks")
+		if claimed then
+			eq("block count quoted in " .. entry.id .. " is current",
+				tonumber(claimed), c.count())
+		end
+	end
+end
+
 -- house style --------------------------------------------------------------------------
 for _, entry in ipairs(j.tutorials) do
 	local text = entry.title .. " " .. entry.blurb
