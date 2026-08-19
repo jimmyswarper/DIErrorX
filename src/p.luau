@@ -362,6 +362,7 @@ local function keyboard(app, shell)
 	-- Any focused text box counts, not just a block field: Delete while typing
 	-- in the palette search must delete a letter, not the selected block.
 	local function typing()
+		if b.typing() then return true end
 		local ok, box = pcall(function()
 			return UserInputService:GetFocusedTextBox()
 		end)
@@ -370,15 +371,17 @@ local function keyboard(app, shell)
 		return canvas and canvas.editing ~= nil
 	end
 
-	UserInputService.InputBegan:Connect(function(input, gameProcessed)
+	-- Keys pressed over the widget reach the widget, not UserInputService, so
+	-- the shortcuts listen where the keys actually land.
+	b.onKey(function(input)
 		if not focused or not widget.Enabled then return end
 		if input.UserInputType ~= Enum.UserInputType.Keyboard then return end
 
 		local key = input.KeyCode
-		local ctrl = UserInputService:IsKeyDown(Enum.KeyCode.LeftControl)
-			or UserInputService:IsKeyDown(Enum.KeyCode.RightControl)
-		local shift = UserInputService:IsKeyDown(Enum.KeyCode.LeftShift)
-			or UserInputService:IsKeyDown(Enum.KeyCode.RightShift)
+		local ctrl = b.keyDown(Enum.KeyCode.LeftControl)
+			or b.keyDown(Enum.KeyCode.RightControl)
+		local shift = b.keyDown(Enum.KeyCode.LeftShift)
+			or b.keyDown(Enum.KeyCode.RightShift)
 		local popup = m.popup()
 
 		-- the completion list gets first refusal on the navigation keys
@@ -443,6 +446,7 @@ end
 
 function p.mount(app, widget)
 	a.setTheme(app.settings.theme or "ink")
+	b.watchInput(widget)
 
 	local shell = { tab = "build" }
 

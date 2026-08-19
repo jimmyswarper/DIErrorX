@@ -16,7 +16,6 @@ local c = require(script.Parent.c)
 local d = require(script.Parent.d)
 local i = require(script.Parent.i)
 
-local UserInputService = game:GetService("UserInputService")
 local RunService = game:GetService("RunService")
 
 local m = {}
@@ -1085,13 +1084,13 @@ function View:wireInput()
 	root.InputChanged:Connect(function(input)
 		if input.UserInputType ~= Enum.UserInputType.MouseWheel then return end
 		local delta = input.Position.Z
-		local ctrl = UserInputService:IsKeyDown(Enum.KeyCode.LeftControl)
-			or UserInputService:IsKeyDown(Enum.KeyCode.RightControl)
+		local ctrl = b.keyDown(Enum.KeyCode.LeftControl)
+			or b.keyDown(Enum.KeyCode.RightControl)
 		if ctrl then
 			local gui = self:pluginGui()
 			local at = gui and (gui:GetRelativeMousePosition() - root.AbsolutePosition) or nil
 			self:setZoom(self.zoom * (delta > 0 and 1.1 or 0.9), at)
-		elseif UserInputService:IsKeyDown(Enum.KeyCode.LeftShift) then
+		elseif b.keyDown(Enum.KeyCode.LeftShift) then
 			self:setPan(self.pan.X + delta * 48, self.pan.Y)
 		else
 			self:setPan(self.pan.X, self.pan.Y + delta * 48)
@@ -1118,13 +1117,14 @@ function View:wireInput()
 		local startPan = self.pan
 		local button = middle and Enum.UserInputType.MouseButton3
 			or Enum.UserInputType.MouseButton1
-		local spaceHeld = UserInputService:IsKeyDown(Enum.KeyCode.Space)
+		local spaceHeld = b.keyDown(Enum.KeyCode.Space)
+		b.noteDown(input.UserInputType)
 		if left and not spaceHeld then
 			-- plain left-drag on empty canvas still pans; a click alone deselects
 		end
 
 		task.spawn(function()
-			while UserInputService:IsMouseButtonPressed(button) do
+			while b.pressing(input, button) do
 				local now = gui:GetRelativeMousePosition()
 				local delta = now - start
 				if delta.Magnitude > 2 then
@@ -1334,21 +1334,25 @@ function View:overField(block)
 	return false
 end
 
-function View:beginPress(block, input)
+-- `carried` marks a block that arrived from the palette already under a held
+-- button: the hold that picks it up happened over there, so it lifts at once
+-- rather than asking for a second one.
+function View:beginPress(block, input, carried)
 	if self.dragging then return end
 	local gui = self:pluginGui()
 	if not gui then return end
-	if input and self:overField(block) then
+	if input then b.noteDown(input.UserInputType) end
+	if input and not carried and self:overField(block) then
 		self.app:select(block.id)
 		return
 	end
 
 	-- Space turns the whole canvas into a hand tool, blocks included.
-	if UserInputService:IsKeyDown(Enum.KeyCode.Space) then
+	if b.keyDown(Enum.KeyCode.Space) then
 		local start = gui:GetRelativeMousePosition()
 		local startPan = self.pan
 		task.spawn(function()
-			while UserInputService:IsMouseButtonPressed(Enum.UserInputType.MouseButton1) do
+			while b.pressing(input, Enum.UserInputType.MouseButton1) do
 				local delta = gui:GetRelativeMousePosition() - start
 				self:setPan(startPan.X + delta.X, startPan.Y + delta.Y)
 				RunService.Heartbeat:Wait()
@@ -1362,7 +1366,11 @@ function View:beginPress(block, input)
 
 	task.spawn(function()
 		local lifted = false
-		while UserInputService:IsMouseButtonPressed(Enum.UserInputType.MouseButton1) do
+		if carried then
+			lifted = true
+			self:beginDrag(block, gui:GetRelativeMousePosition())
+		end
+		while b.pressing(input, Enum.UserInputType.MouseButton1) do
 			local now = gui:GetRelativeMousePosition()
 			if not lifted then
 				if self:shouldLift(os.clock() - held) then
@@ -1428,13 +1436,13 @@ function View:addBlock(defId, canvasPosition)
 end
 
 -- Used by the palette: make the block, then pick it straight up.
-function View:spawnAndDrag(defId, mouse)
+function View:spawnAndDrag(defId, mouse, input)
 	if not self:pluginGui() then return end
 	local block = self:addBlock(defId, self:toCanvas(mouse))
 	if not block then return end
 	task.defer(function()
 		local frame = self.frames[block.id]
-		if frame then self:beginPress(block, nil) end
+		if frame then self:beginPress(block, input, true) end
 	end)
 	return block
 end

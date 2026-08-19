@@ -285,7 +285,7 @@ suites
   ok    parser (109 checks)          lexer and parser against real scripts
   ok    roundtrip (21 checks)        code → blocks → code is stable
   ok    tutorials (1051 checks)      examples import; prose claims hold up
-  ok    ui (480 checks)              the whole plugin, mounted headlessly
+  ok    ui (491 checks)              the whole plugin, mounted headlessly
 ```
 
 The UI suite is the unusual one. `tests/mock.luau` is a small Roblox stand-in —

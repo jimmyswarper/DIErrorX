@@ -188,6 +188,22 @@ so a field growing as you type widens its block and every parent, with no
 measuring code. The only geometry the plugin computes itself is where the drop
 indicator goes, because the engine cannot know that.
 
+**Input comes from the widget, never from `UserInputService`.** Studio routes
+input that lands on a plugin widget to that widget alone; the service only
+hears the game view. Asking it whether the mouse button is down therefore
+always answers "no" while the pointer is over our window. Every gesture here —
+picking a block up, panning, carrying one out of the palette, every keyboard
+shortcut — is driven from the widget's own `InputBegan` and `InputEnded`
+through the small tracker in `b.luau`, and a press-and-hold loop keeps going
+while `b.pressing` says so: the `InputObject` from `InputBegan` reaches its End
+state on release wherever the pointer has wandered to, and the tracked button
+state covers a gesture handed on without one. A release off the edge of the
+window never reports itself, so the tracker forgets everything when the window
+loses focus rather than leaving a button stuck down. The mock models this
+blindness deliberately — `IsMouseButtonPressed` there returns false, as it does
+in Studio — so a gesture built on the service fails the suite instead of
+failing the person using the plugin.
+
 **Views never touch the document.** They go through `app:mutate`, which
 snapshots for undo and emits one change event. That is why undo, autosave and
 the live code panel are not each other's problem.
@@ -207,8 +223,10 @@ it and drives it.
 It is not a substitute for opening Studio, but it catches the class of bug that
 is otherwise only findable by opening Studio: a misspelled property, a nil
 index during a rebuild, a listener that accumulates on every render, an
-interaction that fires when it should not. Ten real bugs have come out of it so
-far, including one where attaching a block to a fresh stack deleted that stack,
+interaction that fires when it should not. Eleven real bugs have come out of it so
+far, including one where every drag in the plugin did nothing at all because
+the gesture loops asked a service that cannot see a plugin widget, one where
+attaching a block to a fresh stack deleted that stack,
 and one where a button passed a property Roblox does not have to `Instance.new`
 — which would have thrown on the first click in Studio.
 

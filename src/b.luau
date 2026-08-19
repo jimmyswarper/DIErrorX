@@ -15,6 +15,7 @@ local a = require(script.Parent.a)
 local b = {}
 
 local overlay = nil
+local typingIn = nil
 
 function b.setOverlay(frame)
 	overlay = frame
@@ -83,6 +84,14 @@ function b.new(className, props, children)
 			instance.AutoButtonColor = false
 			instance.Text = ""
 		end
+	end
+	if instance:IsA("TextBox") then
+		-- UserInputService cannot see a text box inside a plugin widget, so the
+		-- plugin keeps its own answer to "is the user typing?"
+		instance.Focused:Connect(function() typingIn = instance end)
+		instance.FocusLost:Connect(function()
+			if typingIn == instance then typingIn = nil end
+		end)
 	end
 	if instance:IsA("ScrollingFrame") then
 		instance.ScrollBarThickness = 4
@@ -406,6 +415,90 @@ end
 function b.truncate(text, limit)
 	if #text <= limit then return text end
 	return string.sub(text, 1, limit - 1) .. "\u{2026}"
+end
+
+--=============================================================================
+-- gestures
+--
+-- Studio does not route input that lands on a plugin widget through
+-- UserInputService: that service only hears the game view.  Asking it whether
+-- the mouse button is down therefore always answers "no" while the pointer is
+-- over our window, which is enough to make every press-and-hold gesture in the
+-- plugin do nothing at all.  The widget's own input events do fire, so the
+-- button and key state we need is tracked from those instead.
+--=============================================================================
+
+local buttonsDown = {}
+local keysDown = {}
+local watched = setmetatable({}, { __mode = "k" })
+local keyHandlers = {}
+
+-- A press that is released off the edge of the widget never reports its
+-- release, so anything still marked down when the window loses focus is
+-- forgotten rather than left stuck.
+local function forgetAll()
+	table.clear(buttonsDown)
+	table.clear(keysDown)
+end
+
+function b.watchInput(gui)
+	if not gui or watched[gui] then return end
+	watched[gui] = true
+
+	gui.InputBegan:Connect(function(input)
+		if input.UserInputType == Enum.UserInputType.Keyboard then
+			keysDown[input.KeyCode] = true
+			for _, handler in ipairs(keyHandlers) do
+				handler(input)
+			end
+		else
+			buttonsDown[input.UserInputType] = true
+		end
+	end)
+	gui.InputEnded:Connect(function(input)
+		if input.UserInputType == Enum.UserInputType.Keyboard then
+			keysDown[input.KeyCode] = nil
+		else
+			buttonsDown[input.UserInputType] = nil
+		end
+	end)
+	gui.WindowFocusReleased:Connect(forgetAll)
+end
+
+-- Called when a gesture starts from a control that swallowed the press before
+-- the widget saw it, so the loop that follows knows the button is down.
+function b.noteDown(inputType)
+	buttonsDown[inputType] = true
+end
+
+function b.keyDown(keyCode)
+	return keysDown[keyCode] == true
+end
+
+function b.onKey(handler)
+	keyHandlers[#keyHandlers + 1] = handler
+end
+
+-- Whether the press that started a gesture is still going.  The InputObject
+-- handed to InputBegan reaches the End state on release wherever the pointer
+-- has wandered to, which makes it the more trustworthy half of this answer;
+-- the tracked state covers gestures that were started without one.
+function b.pressing(input, inputType)
+	if input then
+		if input.UserInputState == Enum.UserInputState.End then return false end
+		if input.UserInputType then
+			inputType = input.UserInputType
+		end
+	end
+	return buttonsDown[inputType or Enum.UserInputType.MouseButton1] == true
+end
+
+function b.typing()
+	return typingIn ~= nil and typingIn.Parent ~= nil
+end
+
+function b.forgetInput()
+	forgetAll()
 end
 
 return b

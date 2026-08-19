@@ -113,7 +113,26 @@ end
 
 Signal.Once = Signal.Connect
 
-function Signal:Wait() return nil end
+-- Heartbeat loops are what every press-and-hold gesture is built on, so a
+-- test needs a way to live inside one: MOCK.onWait stands in for the frames
+-- passing, and is where a test moves the mouse or lets the button go.  The
+-- ceiling is there so a gesture that is never released fails the suite
+-- instead of hanging it.
+local waits = 0
+function Signal:Wait()
+	if MOCK and MOCK.onWait then
+		waits = waits + 1
+		if waits > 5000 then
+			MOCK.onWait = nil
+			waits = 0
+			error("a gesture ran for 5000 frames without ending", 0)
+		end
+		MOCK.onWait()
+	else
+		waits = 0
+	end
+	return nil
+end
 
 function Signal:Fire(...)
 	for _, handler in ipairs(table.clone(self.handlers)) do
@@ -743,12 +762,44 @@ METHODS.GetFocusedTextBox = function()
 	return MOCK_FOCUSED_BOX
 end
 MOCK_FOCUSED_BOX = nil
-METHODS.IsKeyDown = function(_, keyCode)
-	return MOCK_KEYS[keyCode and keyCode.Name] == true
+-- Input that lands on a plugin widget never reaches UserInputService: the
+-- service only hears the game view.  These answer the way Studio does for a
+-- pointer sitting over our window, which keeps a gesture built on them from
+-- passing here and then failing for real.  Drive input through MOCK.press and
+-- MOCK.key, which go to the widget where it actually arrives.
+METHODS.IsKeyDown = function() return false end
+METHODS.IsMouseButtonPressed = function() return false end
+
+function MOCK.press(inputType)
+	local input = {
+		UserInputType = inputType or Enum.UserInputType.MouseButton1,
+		UserInputState = Enum.UserInputState.Begin,
+	}
+	if MOCK.widget then MOCK.fire(MOCK.widget, "InputBegan", input, false) end
+	return input
 end
-METHODS.IsMouseButtonPressed = function() return MOCK_MOUSE_DOWN end
-MOCK_KEYS = {}
-MOCK_MOUSE_DOWN = false
+
+function MOCK.release(input)
+	if not input then return end
+	input.UserInputState = Enum.UserInputState.End
+	if MOCK.widget then MOCK.fire(MOCK.widget, "InputEnded", input, false) end
+end
+
+function MOCK.key(keyCode)
+	local input = {
+		UserInputType = Enum.UserInputType.Keyboard,
+		KeyCode = keyCode,
+		UserInputState = Enum.UserInputState.Begin,
+	}
+	if MOCK.widget then MOCK.fire(MOCK.widget, "InputBegan", input, false) end
+	return input
+end
+
+function MOCK.keyUp(input)
+	if not input then return end
+	input.UserInputState = Enum.UserInputState.End
+	if MOCK.widget then MOCK.fire(MOCK.widget, "InputEnded", input, false) end
+end
 
 service("Players")
 service("ServerScriptService")
@@ -800,6 +851,7 @@ function MOCK.newPlugin()
 		local widget = makeInstance("DockWidgetPluginGui", id)
 		widget.Enabled = false
 		widgets[id] = widget
+		MOCK.widget = widget
 		MOCK.setAbsolute(widget, Vector2.new(0, 0), Vector2.new(1240, 760))
 		return widget
 	end

@@ -2,6 +2,7 @@
 -- every tutorial, the palette, field editing, dragging, import, undo and both
 -- themes.  Anything that would throw in Studio throws here.
 local a = require(script.Parent.a)
+local b = require(script.Parent.b)
 local c = require(script.Parent.c)
 local d = require(script.Parent.d)
 local j = require(script.Parent.j)
@@ -312,11 +313,7 @@ MOCK.flush()
 do
 	local blocksBefore = d.count(app.doc)
 	MOCK.fire(shell.palette.search, "Focused")
-	MOCK_KEYS = {}
-	MOCK.fire(game:GetService("UserInputService"), "InputBegan", {
-		UserInputType = Enum.UserInputType.Keyboard,
-		KeyCode = Enum.KeyCode.Delete,
-	}, false)
+	MOCK.keyUp(MOCK.key(Enum.KeyCode.Delete))
 	MOCK.flush()
 	eq("Delete while typing does not delete a block", d.count(app.doc), blocksBefore)
 	MOCK.fire(shell.palette.search, "FocusLost", false)
@@ -579,13 +576,12 @@ eq("tidy lines the stacks up", app.doc.stacks[1] and app.doc.stacks[1].x, 24)
 
 -- keyboard ------------------------------------------------------------------------------------------------
 local function pressKey(name, ctrl)
-	MOCK_KEYS = ctrl and { LeftControl = true } or {}
-	MOCK.fire(game:GetService("UserInputService"), "InputBegan", {
-		UserInputType = Enum.UserInputType.Keyboard,
-		KeyCode = Enum.KeyCode[name],
-	}, false)
+	local modifier = ctrl and MOCK.key(Enum.KeyCode.LeftControl) or nil
+	local key = MOCK.key(Enum.KeyCode[name])
 	MOCK.flush()
-	MOCK_KEYS = {}
+	MOCK.keyUp(key)
+	if modifier then MOCK.keyUp(modifier) end
+	MOCK.flush()
 end
 
 app.canvas:addBlock("wait")
@@ -718,14 +714,79 @@ do
 	check("holding it is", app.canvas:shouldLift(0.4))
 
 	-- pressing and letting go selects and nothing more
-	MOCK_MOUSE_DOWN = false
 	MOCK_MOUSE = Vector2.new(400, 400)
-	app.canvas:beginPress(block, { UserInputType = Enum.UserInputType.MouseButton1 })
+	local tap = MOCK.press()
+	MOCK.release(tap)
+	app.canvas:beginPress(block, tap)
 	MOCK.flush()
 	noErrors("a press that is let go of is clean")
 	eq("it selected the block", app.selection, block.id)
 	check("and left it where it was", app.canvas.dragging ~= true)
 	eq("the document did not change", d.count(app.doc), 1)
+end
+
+-- and then it actually moves -----------------------------------------------------
+--
+-- The gesture is driven the way Studio drives it, through the widget's own
+-- input events, because that is the only route input over a plugin window
+-- takes.  A drag loop that asks UserInputService instead sees a button that is
+-- never down and quietly does nothing, which is a bug no amount of testing
+-- around the loop will find.
+do
+	local doc = d.newDoc("Drag")
+	local stack = d.newStack(doc, 0, 0)
+	local block = d.create(doc, "printText")
+	d.attachToStack(doc, block, stack, nil, {})
+	app:setDoc(doc, "drag")
+	MOCK.flush()
+
+	app.canvas.liftAfter = 0
+	MOCK_MOUSE = Vector2.new(400, 400)
+
+	local frames, liftedAt = 0, nil
+	local input = MOCK.press()
+	MOCK.onWait = function()
+		frames = frames + 1
+		if app.canvas.dragging and not liftedAt then liftedAt = frames end
+		MOCK_MOUSE = Vector2.new(400 + frames * 20, 400 + frames * 12)
+		if frames >= 4 then MOCK.release(input) end
+	end
+	app.canvas:beginPress(block, input)
+	MOCK.onWait = nil
+	MOCK.flush()
+
+	noErrors("holding and moving is clean")
+	check("holding the button picks the block up", liftedAt ~= nil)
+	check("the drag ends when the button comes up", not app.canvas.dragging)
+	check("and the block went with the pointer",
+		(app.doc.stacks[1] and app.doc.stacks[1].x or 0) ~= 0
+			or (app.doc.stacks[1] and app.doc.stacks[1].y or 0) ~= 0)
+	eq("without gaining or losing a block", d.count(app.doc), 1)
+
+	app.canvas.liftAfter = nil
+end
+
+-- a gesture cannot be built on UserInputService ------------------------------------
+--
+-- Stated as a check of its own so the reason survives: a plugin widget is
+-- invisible to that service, so anything reading button or key state from it
+-- is reading a permanent "no".
+do
+	local uis = game:GetService("UserInputService")
+	check("the service never sees the button over a widget",
+		uis:IsMouseButtonPressed(Enum.UserInputType.MouseButton1) == false)
+	check("nor a key", uis:IsKeyDown(Enum.KeyCode.LeftControl) == false)
+
+	local held = MOCK.press()
+	check("but the widget does", b.pressing(held, Enum.UserInputType.MouseButton1))
+	MOCK.release(held)
+	check("and knows when it is let go",
+		not b.pressing(held, Enum.UserInputType.MouseButton1))
+
+	local key = MOCK.key(Enum.KeyCode.LeftShift)
+	check("the same goes for keys", b.keyDown(Enum.KeyCode.LeftShift))
+	MOCK.keyUp(key)
+	check("released too", not b.keyDown(Enum.KeyCode.LeftShift))
 end
 
 -- writing on a block has to be readable, on every category and in both themes --------

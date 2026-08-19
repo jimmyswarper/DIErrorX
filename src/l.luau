@@ -16,7 +16,6 @@ local c = require(script.Parent.c)
 local i = require(script.Parent.i)
 local q = require(script.Parent.q)
 
-local UserInputService = game:GetService("UserInputService")
 local RunService = game:GetService("RunService")
 
 local l = {}
@@ -188,15 +187,16 @@ function View:blockRow(def, order)
 		if not gui then return end
 
 		local start = gui:GetRelativeMousePosition()
+		b.noteDown(input.UserInputType)
 		task.spawn(function()
 			local carried = false
-			while UserInputService:IsMouseButtonPressed(Enum.UserInputType.MouseButton1) do
+			while b.pressing(input, Enum.UserInputType.MouseButton1) do
 				local now = gui:GetRelativeMousePosition()
 				if not carried and (now - start).Magnitude > 6 then
 					carried = true
 					b.hideTip()
 					self:remember(def.id)
-					canvas:spawnAndDrag(def.id, now)
+					canvas:spawnAndDrag(def.id, now, input)
 					return
 				end
 				RunService.Heartbeat:Wait()
