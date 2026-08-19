@@ -602,21 +602,201 @@ pressKey("Escape", false)
 noErrors("keyboard shortcuts are clean")
 
 -- no block may contain a child whose size depends on the block's own size ------------------
+-- Both axes: a block auto-sizes in X and Y now that it is a filled slab, so a
+-- scale-sized child on either axis is a feedback loop the engine cannot settle.
 do
 	shell.showTab("build")
-	local anyBlock = nil
-	d.walk(app.doc, function(block) anyBlock = anyBlock or block end)
-	local frame = app.canvas.frames[anyBlock.id]
-	check("a block's height comes only from its content", (function()
+	local offenders = {}
+	for id, frame in pairs(app.canvas.frames) do
 		for _, node in ipairs(frame:GetChildren()) do
 			if node:IsA("GuiObject") then
 				local size = node.Size
-				-- a scale-sized child inside an auto-sizing parent is the loop
-				if size and size.Y and size.Y.Scale ~= 0 then return false end
+				if size.Y.Scale ~= 0 or size.X.Scale ~= 0 then
+					offenders[#offenders + 1] = id .. "/" .. node.Name
+				end
 			end
 		end
-		return true
-	end)(), "a child is sized from the block, which would stop it shrinking")
+	end
+	check("a block's size comes only from its content", #offenders == 0,
+		table.concat(offenders, ", "))
+end
+
+-- blocks interlock -----------------------------------------------------------------
+do
+	shell.showTab("build")
+	local doc = d.newDoc("Interlock")
+	local stack = d.newStack(doc, 0, 0)
+	local first = d.create(doc, "printText")
+	local second = d.create(doc, "wait")
+	d.attachToStack(doc, first, stack, nil, {})
+	d.attachToStack(doc, second, stack, nil, {})
+	app:setDoc(doc, "interlock")
+	MOCK.flush()
+	noErrors("drawing an interlocked run is clean")
+
+	local firstFrame = app.canvas.frames[first.id]
+	local secondFrame = app.canvas.frames[second.id]
+	local function notchOf(frame)
+		local strip = frame:FindFirstChild("Notch")
+		return strip and strip:GetChildren()[1] or nil
+	end
+
+	check("every block has a notch bitten out of its top",
+		notchOf(firstFrame) ~= nil and notchOf(secondFrame) ~= nil)
+	eq("the notch is as deep as the tab is tall",
+		notchOf(firstFrame).Size.Y.Offset, a.metric.notchH)
+
+	-- the first block sits on the canvas, so its notch shows the canvas
+	local topCut = notchOf(firstFrame).BackgroundColor3
+	check("the top block's notch shows the canvas through it",
+		topCut == a.c.bg, tostring(topCut))
+
+	-- the second sits under the first, so its notch is filled by the first
+	local jointCut = notchOf(secondFrame).BackgroundColor3
+	eq("a joint is filled with the colour of the block above it",
+		jointCut, a.blockColor(c.get("printText").cat))
+	check("which is not the canvas", jointCut ~= a.c.bg)
+
+	local stackFrame = app.canvas.stackFrames[stack.id]
+	check("the run ends with a tab", stackFrame:FindFirstChild("Tab") ~= nil)
+	eq("painted like the last block in the run",
+		stackFrame:FindFirstChild("Tab"):GetChildren()[1].BackgroundColor3,
+		a.blockColor(c.get("wait").cat))
+
+	local layout = nil
+	for _, node in ipairs(stackFrame:GetChildren()) do
+		if node:IsA("UIListLayout") then layout = node end
+	end
+	eq("blocks in a run touch, so the joint is the only thing between them",
+		layout.Padding.Offset, 0)
+end
+
+-- a container block is a C, with the workspace showing through its mouth --------------
+do
+	local doc = d.newDoc("C block")
+	local stack = d.newStack(doc, 0, 0)
+	local loop = d.create(doc, "repeatN")
+	d.attachToStack(doc, loop, stack, nil, {})
+	local inside = d.create(doc, "printText")
+	d.attachToSlot(doc, inside, loop, "body", nil, {})
+	app:setDoc(doc, "c block")
+	MOCK.flush()
+	noErrors("drawing a C block is clean")
+
+	local frame = app.canvas.frames[loop.id]
+	local wrap = frame:FindFirstChild("slot_body")
+	check("the slot is there", wrap ~= nil)
+	local mouth = wrap and wrap:FindFirstChild("mouth")
+	check("with a mouth inside it", mouth ~= nil)
+	eq("the mouth shows the workspace", mouth.BackgroundColor3, a.c.bg)
+
+	local arm = nil
+	for _, node in ipairs(wrap:GetChildren()) do
+		if node:IsA("UIPadding") then arm = node end
+	end
+	check("and the arm runs down the left of it",
+		arm ~= nil and arm.PaddingLeft.Offset == a.metric.arm)
+
+	check("the block inside is drawn inside the mouth",
+		app.canvas.frames[inside.id].Parent == mouth)
+	eq("so its notch shows the mouth, not the block around it",
+		app.canvas.frames[inside.id]:FindFirstChild("Notch"):GetChildren()[1]
+			.BackgroundColor3, a.c.bg)
+end
+
+-- a block is picked up by holding, not by clicking ---------------------------------
+do
+	local doc = d.newDoc("Hold")
+	local stack = d.newStack(doc, 0, 0)
+	local block = d.create(doc, "printText")
+	d.attachToStack(doc, block, stack, nil, {})
+	app:setDoc(doc, "hold")
+	MOCK.flush()
+
+	check("a flick of the button is not a drag", not app.canvas:shouldLift(0.02))
+	check("nor is a quick click", not app.canvas:shouldLift(0.1))
+	check("holding it is", app.canvas:shouldLift(0.4))
+
+	-- pressing and letting go selects and nothing more
+	MOCK_MOUSE_DOWN = false
+	MOCK_MOUSE = Vector2.new(400, 400)
+	app.canvas:beginPress(block, { UserInputType = Enum.UserInputType.MouseButton1 })
+	MOCK.flush()
+	noErrors("a press that is let go of is clean")
+	eq("it selected the block", app.selection, block.id)
+	check("and left it where it was", app.canvas.dragging ~= true)
+	eq("the document did not change", d.count(app.doc), 1)
+end
+
+-- writing on a block has to be readable, on every category and in both themes --------
+do
+	-- WCAG relative luminance, so this is the real contrast ratio rather than
+	-- a guess at one
+	local function channel(value)
+		if value <= 0.03928 then return value / 12.92 end
+		return ((value + 0.055) / 1.055) ^ 2.4
+	end
+	local function luminance(colour)
+		return 0.2126 * channel(colour.R) + 0.7152 * channel(colour.G)
+			+ 0.0722 * channel(colour.B)
+	end
+	local function ratio(one, two)
+		local high, low = luminance(one), luminance(two)
+		if low > high then high, low = low, high end
+		return (high + 0.05) / (low + 0.05)
+	end
+
+	for _, theme in ipairs({ "ink", "paper" }) do
+		a.setTheme(theme)
+		local worstText, worstTextAt = 21, ""
+		local worstEdge, worstEdgeAt = 21, ""
+		for _, cat in ipairs(c.cats) do
+			local body = a.blockColor(cat.id)
+			local text = ratio(body, a.inkOn(body))
+			if text < worstText then worstText, worstTextAt = text, cat.id end
+			-- a field pill has to be visible against the block it sits on
+			local pill = ratio(body, a.c.well)
+			if pill < worstEdge then worstEdge, worstEdgeAt = pill, cat.id end
+			-- and the block has to be visible against the canvas
+			check(theme .. ": " .. cat.id .. " stands out from the canvas",
+				ratio(body, a.c.bg) >= 1.6,
+				string.format("%.2f:1", ratio(body, a.c.bg)))
+		end
+		check(theme .. ": block wording is readable on every category",
+			worstText >= 4.5,
+			string.format("worst is %s at %.2f:1", worstTextAt, worstText))
+		check(theme .. ": field pills stand out on every category",
+			worstEdge >= 3, string.format("worst is %s at %.2f:1", worstEdgeAt, worstEdge))
+	end
+	a.setTheme(app.settings.theme or "ink")
+	MOCK.flush()
+	noErrors("checking contrast is clean")
+end
+
+-- fields on a block are pale pills, not sunken wells --------------------------------
+do
+	shell.showTab("build")
+	local doc = d.newDoc("Pills")
+	local stack = d.newStack(doc, 0, 0)
+	local block = d.create(doc, "printText")
+	d.attachToStack(doc, block, stack, nil, {})
+	app:setDoc(doc, "pills")
+	MOCK.flush()
+
+	local box = nil
+	for _, node in ipairs(app.canvas.frames[block.id]:GetDescendants()) do
+		if node:IsA("TextBox") and not box then box = node end
+	end
+	check("the block has a field", box ~= nil)
+	eq("it is a pale pill", box.BackgroundColor3, a.c.well)
+	eq("with dark writing in it", box.TextColor3, a.c.wellInk)
+	local corner = nil
+	for _, node in ipairs(box:GetChildren()) do
+		if node:IsA("UICorner") then corner = node end
+	end
+	check("and it is rounded like one",
+		corner ~= nil and corner.CornerRadius.Offset >= 8,
+		corner and tostring(corner.CornerRadius.Offset) or "no corner")
 end
 
 -- nothing may leak across re-renders ---------------------------------------------------------
@@ -978,18 +1158,27 @@ end
 do
 	for _, theme in ipairs({ "ink", "paper" }) do
 		a.setTheme(theme)
-		local seen = {}
+		local seen, seenBlock = {}, {}
 		for _, cat in ipairs(c.cats) do
 			local colour = a.catColor(cat.id)
 			check(theme .. ": " .. cat.id .. " has a colour",
 				colour ~= nil and colour ~= a.c.text2,
 				"it would fall back to grey")
-			local key = string.format("%d,%d,%d",
-				math.floor(colour.R * 255), math.floor(colour.G * 255),
-				math.floor(colour.B * 255))
-			check(theme .. ": " .. cat.id .. " does not share an ink", not seen[key],
-				"same as " .. tostring(seen[key]))
-			seen[key] = cat.id
+			local function key(value)
+				return string.format("%d,%d,%d",
+					math.floor(value.R * 255), math.floor(value.G * 255),
+					math.floor(value.B * 255))
+			end
+			check(theme .. ": " .. cat.id .. " does not share an ink",
+				not seen[key(colour)], "same as " .. tostring(seen[key(colour)]))
+			seen[key(colour)] = cat.id
+			-- and the darkening a block goes through must not collapse two
+			-- categories onto the same colour
+			local block = a.blockColor(cat.id)
+			check(theme .. ": " .. cat.id .. " is its own colour as a block",
+				not seenBlock[key(block)],
+				"same as " .. tostring(seenBlock[key(block)]))
+			seenBlock[key(block)] = cat.id
 		end
 	end
 	a.setTheme(app.settings.theme or "ink")

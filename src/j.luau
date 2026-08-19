@@ -515,13 +515,15 @@ end
 T{
 	id = "tip-snap", kind = "tip", minutes = 3, level = "start",
 	title = "Dragging, dropping and snapping",
-	blurb = "How blocks join up, and what the amber line is telling you.",
+	blurb = "How blocks join up, and what the amber socket is telling you.",
 	steps = {
-		{ p = "Drag a block by any part of it that is not a field. As you move, a thin amber line appears wherever the block would land if you let go. No line means no join -- the block will sit loose on the canvas as a stack of its own, which is perfectly legal." },
+		{ p = "Hold the left button down on a block -- anywhere on it that is not a field -- and after a moment it lifts, casts a shadow, and follows the mouse. A quick click does not move it, it selects it, so you can click your way down a stack reading the code without ever pulling it apart." },
+		{ h = "Reading the socket" },
+		{ p = "While you are carrying a block, an amber bar with a tab standing on it appears wherever the block would land. That is the socket the block will drop into. No socket means no join -- the block will sit loose on the canvas as a stack of its own, which is perfectly legal." },
 		{ h = "You are always dragging a run" },
 		{ p = "Picking up a block picks up everything below it in the same run. That is deliberate: the blocks under it are the rest of that thought. To move one block on its own, drag it out, drop it somewhere empty, then drag the others back." },
 		{ h = "Dropping into a slot" },
-		{ p = "Container blocks -- if, loops, events, functions -- have an indented slot. Drop near the top of the empty space inside one and the amber line appears indented, meaning 'inside'. Drop just below the block's last line and the line appears at the outer level, meaning 'after'. The indentation of the amber line is the whole answer." },
+		{ p = "Container blocks -- if, loops, events, functions -- have an indented slot. Drop near the top of the empty space inside one and the socket appears indented, inside the mouth of the C. Drop just below the block's last line and it appears at the outer level, meaning 'after'. Where the socket sits is the whole answer." },
 		{ note = "A stack cannot be dropped inside itself. The editor refuses the drop rather than eating your program." },
 		{ h = "Getting around" },
 		{ list = {
@@ -532,7 +534,9 @@ T{
 		} },
 		{ h = "Getting rid of things" },
 		{ p = "Select a block and press Delete, or drag it onto the palette on the left -- the palette lights up to say it will take it. Ctrl+Z brings back anything you regret, and the history is fifty deep." },
-		{ try = "Build a stack of four blocks, then drag the second one out and drop it inside an if block. Watch where the amber line goes as you move." },
+		{ h = "How the blocks fit together" },
+		{ p = "Look at where two blocks meet. The lower one has a notch bitten out of its top edge, and what fills that notch is the colour of the block above it -- so a joined run reads as one interlocked column, and a block sitting on its own shows the canvas through its notch instead. The bottom of every run carries the matching tab." },
+		{ try = "Build a stack of four blocks, then drag the second one out and drop it inside an if block. Watch where the socket goes as you move." },
 	},
 }
 
@@ -655,6 +659,7 @@ T{
 			"Ctrl+F -- jump to the palette search box.",
 			"Scroll -- pan. Shift+scroll -- pan sideways. Ctrl+scroll -- zoom.",
 			"Ctrl+0 -- back to 100%. Ctrl+L -- tidy the stacks into a column.",
+			"Hold the left button on a block -- pick it up. A click just selects.",
 			"Middle-drag, or hold Space and drag -- pan freely.",
 		} },
 		{ h = "Getting work out" },

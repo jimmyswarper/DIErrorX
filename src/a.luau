@@ -37,6 +37,10 @@ local INK = {
 	field = Color3.fromRGB(16, 19, 24),
 	fieldLine = Color3.fromRGB(51, 58, 71),
 	shadow = Color3.fromRGB(0, 0, 0),
+	-- an input sitting on a coloured block: a pale pill, whatever the block
+	well = Color3.fromRGB(243, 242, 238),
+	wellInk = Color3.fromRGB(26, 28, 34),
+	wellHint = Color3.fromRGB(140, 143, 150),
 	cats = {
 		events = Color3.fromRGB(194, 91, 78),
 		control = Color3.fromRGB(209, 145, 60),
@@ -102,6 +106,9 @@ local PAPER = {
 	field = Color3.fromRGB(252, 250, 245),
 	fieldLine = Color3.fromRGB(199, 191, 176),
 	shadow = Color3.fromRGB(120, 112, 96),
+	well = Color3.fromRGB(255, 254, 251),
+	wellInk = Color3.fromRGB(28, 30, 36),
+	wellHint = Color3.fromRGB(150, 148, 142),
 	cats = {
 		events = Color3.fromRGB(160, 62, 50),
 		control = Color3.fromRGB(163, 104, 30),
@@ -164,14 +171,23 @@ a.metric = {
 	actionBar = 38,
 	statusBar = 20,
 	row = 26,
-	rowGap = 2,
-	indent = 18,
-	spine = 3,
+	rowGap = 0,          -- blocks in a run touch; the joint is the notch
 	panelPad = 12,
 	fieldPad = 6,
 	blockText = 13,
 	uiText = 12,
 	microText = 10,
+
+	-- the interlock.  A block carries a notch cut into its top edge, and the
+	-- block above fills that cut with its own colour, so a run reads as one
+	-- interlocked column rather than a pile of separate cards.
+	notchX = 13,         -- how far in from the left edge the notch starts
+	notchW = 22,         -- how wide it is
+	notchH = 5,          -- how deep it bites
+	blockRadius = 6,     -- a block's corner rounding
+	arm = 14,            -- the left arm of a C block, down the side of its mouth
+	mouthPad = 3,        -- the lip of mouth colour around what is inside a C
+	wellRadius = 8,      -- input pills are ovals, the way they are in Scratch
 }
 
 --=============================================================================
@@ -204,6 +220,70 @@ end
 
 function a.catColor(catId)
 	return a.c.cats[catId] or a.c.text2
+end
+
+-- WCAG relative luminance, which is what readability is actually measured in.
+local function channel(value)
+	if value <= 0.03928 then return value / 12.92 end
+	return ((value + 0.055) / 1.055) ^ 2.4
+end
+
+local function luminance(colour)
+	return 0.2126 * channel(colour.R) + 0.7152 * channel(colour.G)
+		+ 0.0722 * channel(colour.B)
+end
+
+local PALE = Color3.fromRGB(250, 249, 246)
+local DARK = Color3.fromRGB(22, 24, 30)
+local BLACK = Color3.fromRGB(0, 0, 0)
+
+-- The luminance a block has to sit at or below for PALE writing on it to clear
+-- 4.5:1.  Solving (Lpale + 0.05) / (L + 0.05) >= 4.5 gives this.
+local BLOCK_CEILING = (luminance(PALE) + 0.05) / 4.5 - 0.05
+
+local blockCache = {}
+
+-- The colour a whole block is painted.  The category inks are tuned to read as
+-- a small chip on a panel; filling a whole block with one is a different job,
+-- so a block's colour is its category's darkened until the writing on it is
+-- legible.  Doing that by rule rather than by hand is what stops a category
+-- added later from being the one nobody can read -- and it has the side effect
+-- the look wants anyway, which is twenty-seven inks of equal weight.
+function a.blockColor(catId)
+	local key = a.c.name .. "/" .. tostring(catId)
+	local hit = blockCache[key]
+	if hit then return hit end
+
+	local colour = a.catColor(catId)
+	if luminance(colour) > BLOCK_CEILING then
+		local low, high = 0, 1
+		for _ = 1, 14 do
+			local mid = (low + high) / 2
+			if luminance(colour:Lerp(BLACK, mid)) > BLOCK_CEILING then
+				low = mid
+			else
+				high = mid
+			end
+		end
+		colour = colour:Lerp(BLACK, high)
+	end
+
+	blockCache[key] = colour
+	return colour
+end
+
+-- Whether writing on a colour should be pale or dark.  Block colours are
+-- clamped dark enough that this always says pale, but a custom block could be
+-- painted anything, so it is asked rather than assumed.
+function a.inkOn(colour)
+	if luminance(colour) > BLOCK_CEILING then return DARK end
+	return PALE
+end
+
+-- The edge drawn round a block: its own colour, darkened.  Without it two
+-- blocks of the same category stacked together read as one tall slab.
+function a.blockEdge(catId)
+	return a.blockColor(catId):Lerp(Color3.fromRGB(0, 0, 0), 0.28)
 end
 
 -- Exposed so tests can prove listeners are being released rather than piling up

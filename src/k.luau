@@ -218,29 +218,33 @@ function View:blockChips(spec, order, parent)
 		local def = c.get(id)
 		if def then
 			index = index + 1
+			-- the same small block the palette shows, so a lesson names a
+			-- block by showing you the thing you will be looking for
+			local paint = function() return a.blockColor(def.cat) end
 			local chip = b.new("TextButton", {
-				Size = UDim2.fromOffset(150, 24),
+				Size = UDim2.fromOffset(154, 24),
 				LayoutOrder = index,
-				bg = "raised",
-				radius = a.metric.radius,
+				bg = paint,
+				radius = 5,
 				Parent = frame,
 			})
 			b.new("Frame", {
-				Size = UDim2.fromOffset(2, 16),
-				Position = UDim2.fromOffset(6, 4),
-				BackgroundColor3 = a.catColor(def.cat),
-				BackgroundTransparency = 0,
+				Size = UDim2.fromOffset(14, 3),
+				Position = UDim2.fromOffset(9, 0),
+				bg = "bg",
+				radius = 1,
 				Parent = chip,
 			})
-			b.mono({
+			b.text({
 				Text = def.label,
-				Size = UDim2.new(1, -20, 1, 0),
-				Position = UDim2.fromOffset(14, 0),
+				Size = UDim2.new(1, -20, 1, -3),
+				Position = UDim2.fromOffset(10, 3),
+				Font = a.font.uiMedium,
 				TextSize = 11,
+				fg = function() return a.inkOn(a.blockColor(def.cat)) end,
 				TextTruncate = Enum.TextTruncate.AtEnd,
 				Parent = chip,
 			})
-			b.states(chip, "raised", 0.2)
 			b.tip(chip, def.doc .. "\n\nClick to put this block on the canvas.")
 			chip.MouseButton1Click:Connect(function()
 				if self.app.canvas then self.app.canvas:addBlock(def.id) end

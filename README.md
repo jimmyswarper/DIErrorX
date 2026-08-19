@@ -11,17 +11,17 @@ changes straight back into that same script.
 ┌──────────────────────────────────────────────────────────────────────┐
 │ ≡ ABlocks   BUILD  LEARN  IMPORT  SETUP              First project  ◑│
 ├──────────────┬───────────────────────────────┬───────────────────────┤
-│ / search     │ ▏when script.Parent is        │ Script      12 lines  │
-│ fits Script  │ ▏  touched by hit             ├───────────────────────┤
-│              │ ▏  ┌ make hum = the humanoid  │ 1  script.Parent      │
-│ STARRED      │ ▏  │   of hit.Parent          │ 2    .Touched:Connect │
-│  ★ print     │ ▏  │ stop here unless hum     │ 3    local hum = hit  │
-│              │ ▏  └ teleport hit.Parent to   │ 4    if not hum then  │
-│ E Events  31 │ ▏    (0, 10, 0)               │ 5      return         │
-│ C Control 30 │                               │ 6    end              │
-│ ? Logic   26 │ ▏heal hit.Parent by 25        │ 7  end)               │
-│ U Interfa 69 │                               │ 8                     │
-│ + My bloc  1 │                               │ 9  healSomeone(...)   │
+│ / search     │  ╭─╨──────────────────────╮   │ Script      12 lines  │
+│ fits Script  │  │ when (script.Parent)   │   │ ───────────────────── │
+│              │  │ is touched by (hit)    │   │ 1  script.Parent      │
+│ STARRED      │  │  ╭─╨─────────────────╮ │   │ 2    .Touched:Connect │
+│ ╭─╨────────╮ │  │  │ make (hum) = the  │ │   │ 3    local hum = hit  │
+│ │ print    │ │  │  │ humanoid of (hit) │ │   │ 4    if not hum then  │
+│ ╰─╥────────╯ │  │  ╰─┬─────────────────╯ │   │ 5      return         │
+│              │  │  ╭─╨─────────────────╮ │   │ 6    end              │
+│ E Events  31 │  │  │ stop unless (hum) │ │   │ 7    hum:TakeDamage(9)│
+│ C Control 30 │  │  ╰─┬─────────────────╯ │   │ 8  end)               │
+│ U Interfa 69 │  ╰─┬──────────────────────╯   │ 9                     │
 ├──────────────┴───────────────────────────────┴───────────────────────┤
 │ undo redo tidy 100% save            Script   copy   Update Trap      │
 ├──────────────────────────────────────────────────────────────────────┤
@@ -171,6 +171,26 @@ share or drop into another game — and **Load from a ModuleScript** reads it
 back. The reader uses the plugin's own parser and accepts only constants, so
 loading someone's library cannot run their code.
 
+## How the blocks look and move
+
+Blocks are filled slabs of their category's colour with a notch bitten out of
+the top edge. What fills that notch is whatever the block is sitting on: the
+canvas when nothing is above it, so the cut is visible, or the block above it,
+so the joint reads as interlocked. Every run ends with the matching tab. A
+container block is a C — an arm down the left, and the canvas showing through
+its mouth.
+
+**A block is picked up by holding the left button on it**, not by clicking and
+dragging. It lifts after a moment, casts a shadow, and follows the mouse; a
+quick click just selects, so you can read your way down a stack without pulling
+it apart. While you are carrying one, an amber socket — a bar with a tab
+standing on it — shows exactly where it will fit.
+
+The wording on a block is set in the interface face because it is a sentence;
+the fields are monospace pills because they are Luau. Category colours are
+darkened until pale writing on them clears 4.5:1, by rule rather than by hand,
+which is checked for all 27 categories in both themes by the UI suite.
+
 ## A design decision worth knowing about
 
 Statements are blocks; expressions are typed into fields.
@@ -203,7 +223,7 @@ Twenty-three modules, one letter each, in `src/`:
 | `j` | the 32 tutorials |
 | `k` | tutorials tab |
 | `l` | palette |
-| `m` | canvas: rendering, dragging, snapping, zoom, field editing |
+| `m` | canvas: block shapes, dragging, snapping, zoom, field editing |
 | `n` | code panel, import tab, settings |
 | `o` | application state, undo, projects, saving |
 | `p` | the window: top tabs, bottom action bar, keyboard |
@@ -265,7 +285,7 @@ suites
   ok    parser (109 checks)          lexer and parser against real scripts
   ok    roundtrip (21 checks)        code → blocks → code is stable
   ok    tutorials (1051 checks)      examples import; prose claims hold up
-  ok    ui (340 checks)              the whole plugin, mounted headlessly
+  ok    ui (480 checks)              the whole plugin, mounted headlessly
 ```
 
 The UI suite is the unusual one. `tests/mock.luau` is a small Roblox stand-in —

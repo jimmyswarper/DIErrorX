@@ -1235,6 +1235,7 @@ function n.settingsView(app, parent)
 	-- shortcuts ---------------------------------------------------------------------
 	local keys = section(column, 6, "keyboard")
 	local list = {
+		{ "hold left button", "pick a block up off the canvas" },
 		{ "Ctrl+Z / Ctrl+Y", "undo, redo" },
 		{ "Delete", "remove the selected block and what follows it" },
 		{ "Ctrl+D", "duplicate the selection" },

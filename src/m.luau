@@ -23,6 +23,7 @@ local m = {}
 
 local GRID = 20
 local SNAP_RADIUS = 96
+local LIFT_SECONDS = 0.16
 local MIN_ZOOM, MAX_ZOOM = 0.5, 2
 
 --=============================================================================
@@ -293,11 +294,13 @@ m.popup = getPopup
 -- fields
 --=============================================================================
 
-local function fieldWell(props)
-	return b.new("Frame", props)
-end
+-- A field sits on a coloured block, so it is a pale pill rather than a sunken
+-- well: the block is the surface, and the pill is the hole cut in it.  Pills
+-- are fully rounded; a multi-line field is a panel and keeps square-ish corners
+-- because an oval that tall reads as a mistake.
+local FIELD_H = 22
 
--- A text field inside a block: monospace, inset, and wired to IntelliSense.
+-- A text field inside a block: monospace, because a field is Luau.
 local function makeTextField(view, block, def, field, value)
 	local app = view.app
 	local multiline = field.kind == "multiline"
@@ -313,21 +316,21 @@ local function makeTextField(view, block, def, field, value)
 		TextXAlignment = Enum.TextXAlignment.Left,
 		TextYAlignment = multiline and Enum.TextYAlignment.Top or Enum.TextYAlignment.Center,
 		AutomaticSize = multiline and Enum.AutomaticSize.XY or Enum.AutomaticSize.X,
-		Size = UDim2.fromOffset(multiline and 220 or 0, multiline and 40 or 18),
-		bg = "field",
-		fg = "text",
-		ph = "text3",
-		stroke = { color = "fieldLine" },
-		radius = 2,
+		Size = UDim2.fromOffset(multiline and 220 or 0, multiline and 44 or FIELD_H),
+		bg = "well",
+		fg = "wellInk",
+		ph = "wellHint",
+		radius = multiline and 4 or a.metric.wellRadius,
 	})
 	b.new("UIPadding", {
-		PaddingLeft = UDim.new(0, 5), PaddingRight = UDim.new(0, 5),
-		PaddingTop = UDim.new(0, multiline and 4 or 0),
-		PaddingBottom = UDim.new(0, multiline and 4 or 0),
+		PaddingLeft = UDim.new(0, multiline and 6 or 8),
+		PaddingRight = UDim.new(0, multiline and 6 or 8),
+		PaddingTop = UDim.new(0, multiline and 5 or 0),
+		PaddingBottom = UDim.new(0, multiline and 5 or 0),
 		Parent = box,
 	})
 	b.new("UISizeConstraint", {
-		MinSize = Vector2.new(multiline and 220 or 26, multiline and 40 or 18),
+		MinSize = Vector2.new(multiline and 220 or 30, multiline and 44 or FIELD_H),
 		MaxSize = Vector2.new(multiline and 620 or 460, math.huge),
 		Parent = box,
 	})
@@ -430,23 +433,23 @@ local function makeChoiceField(view, block, def, field, value)
 	local app = view.app
 	local button = b.new("TextButton", {
 		AutomaticSize = Enum.AutomaticSize.X,
-		Size = UDim2.fromOffset(0, 18),
-		bg = "field",
-		stroke = { color = "fieldLine" },
-		radius = 2,
+		Size = UDim2.fromOffset(0, FIELD_H),
+		bg = "well",
+		radius = a.metric.wellRadius,
 		layout = { dir = "x", gap = 5, align = "middle" },
 	})
 	b.new("UIPadding", {
-		PaddingLeft = UDim.new(0, 5), PaddingRight = UDim.new(0, 5), Parent = button })
+		PaddingLeft = UDim.new(0, 8), PaddingRight = UDim.new(0, 7), Parent = button })
 
 	local label = b.mono({
 		Text = value,
 		AutomaticSize = Enum.AutomaticSize.X,
-		Size = UDim2.fromOffset(0, 18),
+		Size = UDim2.fromOffset(0, FIELD_H),
 		LayoutOrder = 1,
+		fg = "wellInk",
 		Parent = button,
 	})
-	local chevron = b.chevron(7, "text3")
+	local chevron = b.chevron(7, "wellHint")
 	chevron.LayoutOrder = 2
 	chevron.Parent = button
 
@@ -504,31 +507,34 @@ end
 -- block rendering
 --=============================================================================
 
-local function textRun(text)
+-- The wording on a block is prose, not code, so it is set in the interface
+-- face; only the fields are monospace, because only the fields are Luau.
+local function textRun(text, ink)
 	local trimmed = string.match(text, "^%s*(.-)%s*$")
 	if trimmed == "" then return nil end
-	return b.mono({
+	return b.text({
 		Text = trimmed,
 		AutomaticSize = Enum.AutomaticSize.X,
-		Size = UDim2.fromOffset(0, 18),
-		fg = "text2",
+		Size = UDim2.fromOffset(0, 20),
+		Font = a.font.uiMedium,
+		fg = ink,
 		TextSize = a.metric.blockText,
 	})
 end
 
 -- One line of a block: alternating words and fields.
-local function renderRow(view, block, def, template, order, indentLeft)
+local function renderRow(view, block, def, template, order, indentLeft, ink)
 	local row = b.new("Frame", {
 		Size = UDim2.fromOffset(0, 0),
 		AutomaticSize = Enum.AutomaticSize.XY,
 		LayoutOrder = order,
-		layout = { dir = "x", gap = 5, align = "middle" },
+		layout = { dir = "x", gap = 6, align = "middle" },
 	})
 	b.new("UIPadding", {
-		PaddingLeft = UDim.new(0, indentLeft or 10),
-		PaddingRight = UDim.new(0, 10),
-		PaddingTop = UDim.new(0, 4),
-		PaddingBottom = UDim.new(0, 4),
+		PaddingLeft = UDim.new(0, indentLeft or 12),
+		PaddingRight = UDim.new(0, 12),
+		PaddingTop = UDim.new(0, 3),
+		PaddingBottom = UDim.new(0, 3),
 		Parent = row,
 	})
 
@@ -536,7 +542,7 @@ local function renderRow(view, block, def, template, order, indentLeft)
 	for _, part in ipairs(template) do
 		local child = nil
 		if part.t == "text" then
-			child = textRun(part.v)
+			child = textRun(part.v, ink)
 		else
 			local field = def.fields[part.k]
 			local value = c.fieldValue(def, block, part.k)
@@ -555,85 +561,148 @@ local function renderRow(view, block, def, template, order, indentLeft)
 	return row
 end
 
+--=============================================================================
+-- the interlock
+--
+-- A block has a notch bitten out of its top edge.  What fills that notch is
+-- whatever is above the block: the block before it in the run, or the surface
+-- the run is sitting on.  So a joint between two blocks shows the upper
+-- block's colour carrying on down into the lower one, which is what makes a
+-- run read as interlocked rather than as a pile of separate cards.  The last
+-- block of a run is followed by a matching tab, so the bottom of a stack has
+-- the piece that would fit into whatever came next.
+--
+-- Nothing here measures anything.  Both pieces are fixed-size rows in the same
+-- list layout as everything else, so no child is ever sized from its parent.
+--=============================================================================
+
+local function joint(fill, order, name)
+	local strip = b.new("Frame", {
+		Name = name,
+		Size = UDim2.fromOffset(a.metric.notchX + a.metric.notchW + 8, a.metric.notchH),
+		LayoutOrder = order,
+	})
+	b.new("Frame", {
+		Size = UDim2.fromOffset(a.metric.notchW, a.metric.notchH),
+		Position = UDim2.fromOffset(a.metric.notchX, 0),
+		bg = fill,
+		radius = 2,
+		Parent = strip,
+	})
+	return strip
+end
+
+-- What a notch is filled with, as a theme token so switching themes repaints
+-- it: the category above, or the surface the run sits on.
+local function fillOf(aboveCat, surface)
+	if aboveCat then
+		return function() return a.blockColor(aboveCat) end
+	end
+	return surface
+end
+
 local renderList
 
-local function renderBlock(view, block, order)
+-- Returns the frame and the category it was painted with, so the next block in
+-- the run knows what to fill its notch with.
+local function renderBlock(view, block, order, aboveCat, surface)
 	local def = c.get(block.k)
+	local cat = def and def.cat or "special"
+	local paint = function() return a.blockColor(cat) end
+	local ink = function() return a.inkOn(a.blockColor(cat)) end
 
-	-- The category spine is the block's own background showing through on the
-	-- left, rather than a child frame.  A child sized from its parent's height
-	-- would hold the parent open, and the block could never shrink again.
 	local frame = b.new("Frame", {
 		Name = block.id,
 		Size = UDim2.fromOffset(0, 0),
 		AutomaticSize = Enum.AutomaticSize.XY,
 		LayoutOrder = order,
-		BackgroundColor3 = a.catColor(def and def.cat or "special"),
-		BackgroundTransparency = 0,
-	})
-
-	local inner = b.new("Frame", {
-		Size = UDim2.fromOffset(0, 0),
-		AutomaticSize = Enum.AutomaticSize.XY,
-		Position = UDim2.fromOffset(a.metric.spine, 0),
+		bg = paint,
+		radius = a.metric.blockRadius,
 		layout = { dir = "y", gap = 0 },
-		bg = "raised",
+	})
+	b.new("UIPadding", {
+		PaddingBottom = UDim.new(0, a.metric.notchH),
 		Parent = frame,
 	})
+	joint(fillOf(aboveCat, surface), 0, "Notch").Parent = frame
 
 	if not def then
 		b.mono({
 			Text = "unknown block: " .. tostring(block.k),
-			Size = UDim2.fromOffset(240, 20),
+			Size = UDim2.fromOffset(240, 22),
+			LayoutOrder = 1,
 			fg = "err",
-			Parent = inner,
+			Parent = frame,
 		})
 		view.frames[block.id] = frame
-		return frame
+		return frame, cat
 	end
 
 	local order2 = 1
 	for _, template in ipairs(def.headTpl) do
-		renderRow(view, block, def, template, order2, 10).Parent = inner
+		renderRow(view, block, def, template, order2, 12, ink).Parent = frame
 		order2 = order2 + 1
 	end
 
+	-- A block with slots is a C: the arm runs down the left of the mouth, and
+	-- the tail row closes it off underneath.
 	for _, slot in ipairs(def.slots) do
 		if slot.preTpl then
-			renderRow(view, block, def, slot.preTpl, order2, 10).Parent = inner
+			renderRow(view, block, def, slot.preTpl, order2, 12, ink).Parent = frame
 			order2 = order2 + 1
 		end
-		local region = b.new("Frame", {
+		local wrap = b.new("Frame", {
 			Name = "slot_" .. slot.key,
 			Size = UDim2.fromOffset(0, 0),
 			AutomaticSize = Enum.AutomaticSize.XY,
 			LayoutOrder = order2,
-			layout = { dir = "y", gap = a.metric.rowGap },
-			Parent = inner,
+			layout = { dir = "y", gap = 0 },
+			Parent = frame,
 		})
 		b.new("UIPadding", {
-			PaddingLeft = UDim.new(0, a.metric.indent),
-			PaddingBottom = UDim.new(0, 3),
-			Parent = region,
+			PaddingLeft = UDim.new(0, a.metric.arm),
+			PaddingRight = UDim.new(0, 5),
+			PaddingBottom = UDim.new(0, 4),
+			Parent = wrap,
+		})
+		-- the mouth is the workspace showing through the C, the way it does in
+		-- every block editor worth copying
+		local mouth = b.new("Frame", {
+			Name = "mouth",
+			Size = UDim2.fromOffset(0, 0),
+			AutomaticSize = Enum.AutomaticSize.XY,
+			bg = "bg",
+			radius = 4,
+			layout = { dir = "y", gap = a.metric.rowGap },
+			Parent = wrap,
+		})
+		b.new("UIPadding", {
+			PaddingLeft = UDim.new(0, a.metric.mouthPad),
+			PaddingRight = UDim.new(0, a.metric.mouthPad),
+			PaddingTop = UDim.new(0, a.metric.mouthPad),
+			PaddingBottom = UDim.new(0, a.metric.mouthPad),
+			Parent = mouth,
 		})
 		order2 = order2 + 1
-		renderList(view, d.children(view.app.doc, block, slot.key), region, {
-			kind = "slot", parent = block, slotKey = slot.key, frame = region,
-		})
+		renderList(view, d.children(view.app.doc, block, slot.key), mouth, {
+			kind = "slot", parent = block, slotKey = slot.key, frame = mouth,
+		}, "bg")
 	end
 
 	if def.tailTpl then
-		renderRow(view, block, def, def.tailTpl, order2, 10).Parent = inner
+		renderRow(view, block, def, def.tailTpl, order2, 12, ink).Parent = frame
 	end
 
-	-- selection and hover live on a stroke so nothing shifts when they change
+	-- Selection and hover live on a stroke so nothing shifts when they change.
+	-- At rest it is a darker edge of the block's own colour, which is what
+	-- keeps two blocks of the same category from merging into one slab.
 	local stroke = b.new("UIStroke", {
-		Thickness = 1,
-		Color = a.c.lineSoft,
-		Transparency = 0.35,
+		Thickness = 2,
+		Transparency = 0,
 		Parent = frame,
 	})
-	view.strokes[block.id] = stroke
+	a.bind(stroke, "Color", function() return a.blockEdge(cat) end)
+	view.strokes[block.id] = { stroke = stroke, cat = cat }
 
 	frame.InputBegan:Connect(function(input)
 		if input.UserInputType == Enum.UserInputType.MouseButton1 then
@@ -657,36 +726,46 @@ local function renderBlock(view, block, order)
 	if def.doc then
 		b.tip(frame, function()
 			if view.dragging then return nil end
-			return def.label .. "  --  " .. def.doc
+			return def.label .. "  --  " .. def.doc ..
+				"\nHold the left button on it to pick it up."
 		end)
 	end
 
 	view.frames[block.id] = frame
-	return frame
+	return frame, cat
 end
 
 -- Draws a run of blocks into `container` and registers it as a drop target.
-function renderList(view, blocks, container, info)
+-- `surface` is the theme token of whatever the run is sitting on, which is
+-- what the first block's notch is filled with.
+function renderList(view, blocks, container, info, surface)
 	local items = {}
+	local above = nil
 	for index, block in ipairs(blocks) do
-		local frame = renderBlock(view, block, index)
+		local frame, cat = renderBlock(view, block, index, above, surface)
 		frame.Parent = container
 		items[#items + 1] = { block = block, frame = frame }
+		above = cat
 	end
 
 	if #blocks == 0 then
+		-- an empty mouth: a notch with nothing in it, so it reads as a socket
 		local empty = b.new("Frame", {
-			Size = UDim2.new(0, 54, 0, 12),
+			Name = "Empty",
+			Size = UDim2.fromOffset(58, 16),
 			LayoutOrder = 1,
 			Parent = container,
 		})
 		b.new("Frame", {
-			Size = UDim2.new(1, 0, 0, 1),
-			Position = UDim2.fromOffset(0, 6),
+			Size = UDim2.fromOffset(a.metric.notchW, a.metric.notchH),
+			Position = UDim2.fromOffset(a.metric.notchX, 0),
 			bg = "line",
-			BackgroundTransparency = 0.4,
+			BackgroundTransparency = 0.55,
+			radius = 2,
 			Parent = empty,
 		})
+	else
+		joint(fillOf(above, surface), #blocks + 1, "Tab").Parent = container
 	end
 
 	info.items = items
@@ -734,15 +813,29 @@ function m.mount(app, parent)
 	})
 	view.scale = b.new("UIScale", { Scale = view.zoom, Parent = view.content })
 
+	-- Where the block will land, drawn as the silhouette of a block's top edge:
+	-- a bar with the tab standing on it.  A plain line says "somewhere here";
+	-- this says "this is the socket it goes into".
 	view.indicator = b.new("Frame", {
 		Name = "Drop",
-		Size = UDim2.fromOffset(80, 2),
+		Size = UDim2.fromOffset(80, 6),
 		Visible = false,
 		bg = "accent",
+		radius = 3,
 		ZIndex = 60,
 		Parent = view.root,
 	})
+	b.new("Frame", {
+		Size = UDim2.fromOffset(a.metric.notchW, a.metric.notchH),
+		Position = UDim2.fromOffset(a.metric.notchX, -a.metric.notchH + 2),
+		bg = "accent",
+		radius = 2,
+		ZIndex = 60,
+		Parent = view.indicator,
+	})
 
+
+	view:makeLift()
 	view:buildGrid()
 	view:wireInput()
 
@@ -758,6 +851,23 @@ end
 --=============================================================================
 -- grid
 --=============================================================================
+
+-- The shadow a lifted stack casts, so a picked-up block reads as picked up
+-- rather than merely selected.  It sits on the content layer so it pans and
+-- zooms with the canvas, which means it is rebuilt with everything else.
+function View:makeLift()
+	self.lift = b.new("Frame", {
+		Name = "Lift",
+		Size = UDim2.fromOffset(0, 0),
+		Visible = false,
+		bg = "shadow",
+		BackgroundTransparency = 0.72,
+		radius = a.metric.blockRadius,
+		ZIndex = 45,
+		Parent = self.content,
+	})
+	return self.lift
+end
 
 function View:buildGrid()
 	self.gridLines = { vertical = {}, horizontal = {} }
@@ -827,6 +937,8 @@ function View:render()
 	self.rendering = true
 
 	b.clear(self.content)
+	-- the shadow lives on the content layer, so it goes with everything else
+	self:makeLift()
 	if self.empty then
 		self.empty:Destroy()
 		self.empty = nil
@@ -848,7 +960,7 @@ function View:render()
 		self.stackFrames[stack.id] = frame
 		renderList(self, d.stackBlocks(self.app.doc, stack), frame, {
 			kind = "stack", stack = stack, frame = frame,
-		})
+		}, "bg")
 	end
 
 	if #self.app.doc.stacks == 0 then
@@ -870,8 +982,8 @@ function View:render()
 			Parent = self.empty,
 		})
 		b.text({
-			Text = "Drag a block out of the palette, or press Ctrl+F to search it.\n" ..
-				"The Learn tab starts from the very beginning.",
+			Text = "Click a block in the palette to place it, or drag it out here.\n" ..
+				"Once it is on the canvas, hold the left button on it to move it.",
 			Size = UDim2.new(1, 0, 0, 34),
 			Position = UDim2.fromOffset(0, 22),
 			TextWrapped = true,
@@ -894,17 +1006,18 @@ function View:render()
 end
 
 function View:paintStates()
-	for id, stroke in pairs(self.strokes) do
+	for id, entry in pairs(self.strokes) do
+		local stroke = entry.stroke
 		if stroke.Parent then
 			if self.app.selection == id then
 				stroke.Color = a.c.accent
-				stroke.Transparency = 0
+				stroke.Thickness = 2
 			elseif self.app.hover == id then
-				stroke.Color = a.c.text3
-				stroke.Transparency = 0.2
+				stroke.Color = a.inkOn(a.blockColor(entry.cat))
+				stroke.Thickness = 2
 			else
-				stroke.Color = a.c.lineSoft
-				stroke.Transparency = 0.35
+				stroke.Color = a.blockEdge(entry.cat)
+				stroke.Thickness = 2
 			end
 		end
 	end
@@ -1146,10 +1259,18 @@ function View:updateDrag(mouse)
 	if best then
 		local at = best.at - self.root.AbsolutePosition
 		self.indicator.Visible = true
-		self.indicator.Position = UDim2.fromOffset(at.X, at.Y - 1)
-		self.indicator.Size = UDim2.fromOffset(math.max(60, best.width), 2)
+		self.indicator.Position = UDim2.fromOffset(at.X, at.Y - 3)
+		self.indicator.Size = UDim2.fromOffset(math.max(60, best.width), 6)
 	else
 		self.indicator.Visible = false
+	end
+
+	-- the shadow follows the stack, one block's corner behind it
+	if self.lift then
+		local size = drag.frame.AbsoluteSize / self.zoom
+		self.lift.Visible = true
+		self.lift.Position = UDim2.fromOffset(canvas.X + 5, canvas.Y + 6)
+		self.lift.Size = UDim2.fromOffset(size.X, size.Y)
 	end
 end
 
@@ -1157,6 +1278,7 @@ function View:endDrag()
 	local drag = self.drag
 	self.dragging = false
 	self.indicator.Visible = false
+	if self.lift then self.lift.Visible = false end
 	if not drag then return end
 
 	local doc = self.app.doc
@@ -1236,15 +1358,15 @@ function View:beginPress(block, input)
 	end
 
 	self.app:select(block.id)
-	local start = gui:GetRelativeMousePosition()
+	local held = os.clock()
 
 	task.spawn(function()
-		local moved = false
+		local lifted = false
 		while UserInputService:IsMouseButtonPressed(Enum.UserInputType.MouseButton1) do
 			local now = gui:GetRelativeMousePosition()
-			if not moved then
-				if (now - start).Magnitude > 4 then
-					moved = true
+			if not lifted then
+				if self:shouldLift(os.clock() - held) then
+					lifted = true
 					self:beginDrag(block, now)
 				end
 			else
@@ -1252,8 +1374,16 @@ function View:beginPress(block, input)
 			end
 			RunService.Heartbeat:Wait()
 		end
-		if moved then self:endDrag() end
+		if lifted then self:endDrag() end
 	end)
+end
+
+-- A block is picked up by holding the button on it, not by clicking and
+-- dragging.  A quick click therefore selects it and nothing else, which is
+-- what makes it safe to click a block in a stack to read the code it wrote,
+-- and what stops a stack coming apart under a slightly wobbly hand.
+function View:shouldLift(heldFor)
+	return heldFor >= (self.liftAfter or LIFT_SECONDS)
 end
 
 --=============================================================================

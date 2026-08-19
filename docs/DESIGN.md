@@ -20,12 +20,14 @@ So the reference here is technical drafting and printed manuals:
 - **Sharp corners.** 2px radius on things you click, 0 everywhere else.
 - **One accent.** Ochre. It marks the current thing and nothing else — the
   active tab, the selected block, the drop indicator, the primary button.
-- **Printing inks for categories.** A dozen muted hues, all roughly equal in
-  weight, so a full canvas reads as a document rather than a bag of sweets.
-  Twenty-seven categories share them rather than each getting one, because
-  twenty-seven distinguishable colours do not exist at this chroma and a
-  category is already named in the palette. A category shows as a 3px spine on
-  the left edge of a block; that is all.
+- **Printing inks for categories.** Twenty-seven of them, one each, and a block
+  is filled with its category's ink rather than merely marked by it. The ink a
+  chip is drawn in and the colour a whole block is painted are not the same
+  job, so `a.blockColor` takes the category ink and darkens it — by binary
+  search on WCAG luminance — until pale writing on it clears 4.5:1. Doing that
+  by rule rather than by hand is what stops the twenty-eighth category from
+  being the one nobody can read, and it has the side effect the look wants
+  anyway: twenty-seven inks of equal weight.
 - **Monospace where it is code.** Block wording, fields, the code panel and the
   status bar are all `Enum.Font.Code`. Chrome — buttons, tabs, headings — is
   Gotham. The split tells you at a glance which text is yours and which is the
@@ -41,8 +43,43 @@ So the reference here is technical drafting and printed manuals:
   two things you actually do (undo, and write the script out), so they stay put
   whichever tab you are on, and a thin status strip runs beneath it.
 
-Everything sits on a 4px grid; block rows are 26px so a stack lines up with the
-canvas grid at 100% zoom.
+Everything sits on a 4px grid.
+
+### Blocks that fit together
+
+A block is a filled slab with a notch bitten out of its top edge, a mouth if it
+holds other blocks, and a tab at the bottom of every run. Two properties fall
+out of doing it this way rather than by drawing puzzle shapes:
+
+**The joint is the block above, showing through.** What fills a block's notch is
+not a decoration the block owns — it is the colour of whatever the block is
+sitting on. Nothing above it means the canvas shows through, which reads as a
+real cut; the block above means that block's colour carries on down into it,
+which reads as interlocked. One rule, both states, no third case to keep in
+sync, and a run stays correct however it is rearranged because every re-render
+recomputes it from the run it is now in.
+
+**Nothing measures anything.** The notch and the tab are fixed-size rows in the
+same list layout as the wording, so no child is ever sized from the parent it
+would then resize. That constraint is why they are rows rather than shapes
+hanging off an edge, and the UI suite fails the build if any child of a block
+acquires a scale-sized axis.
+
+The rest follows the same reasoning:
+
+- **A C block is padding, not a shape.** A container's slot is a wrapper with
+  14px of left padding — the arm — around a mouth painted in the canvas colour.
+  The block's own fill shows through the padding, so the C draws itself.
+- **Blocks in a run touch.** The list gap is zero; the notch is the only thing
+  between two blocks, which is the point.
+- **Wording is prose, fields are code.** The label on a block is set in the
+  interface face, because "when this is touched by" is a sentence. The fields
+  are monospace pale pills, because they are Luau. The two typefaces are the
+  fastest way to see what you can type into and what you cannot.
+- **Picked up, not clicked.** A block lifts after the button has been held on
+  it, and casts a shadow when it does. A click selects and nothing more, so
+  reading your way down a stack cannot pull it apart, and the drop target is
+  drawn as the silhouette of a block's top edge rather than as a line.
 
 ### Six hundred and eighty blocks in a list you can still read
 

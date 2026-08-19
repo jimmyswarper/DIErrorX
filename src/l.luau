@@ -80,36 +80,56 @@ end
 -- rows
 --=============================================================================
 
+-- A palette entry is a small version of the block it places, notch and all, so
+-- that what you pick up looks like what you dropped.
 function View:blockRow(def, order)
 	local row = b.new("TextButton", {
-		Size = UDim2.new(1, 0, 0, 24),
+		Size = UDim2.new(1, 0, 0, 30),
 		LayoutOrder = order,
 		bg = "panel",
 	})
 
+	local paint = function() return a.blockColor(def.cat) end
+	local chip = b.new("Frame", {
+		Size = UDim2.new(1, -52, 0, 24),
+		Position = UDim2.fromOffset(4, 3),
+		bg = paint,
+		radius = 5,
+		Parent = row,
+	})
+	-- the notch, filled with the palette behind it, so it reads as a cut
 	b.new("Frame", {
-		Size = UDim2.fromOffset(2, 16),
-		Position = UDim2.fromOffset(0, 4),
-		BackgroundColor3 = a.catColor(def.cat),
-		BackgroundTransparency = 0,
+		Size = UDim2.fromOffset(14, 3),
+		Position = UDim2.fromOffset(9, 0),
+		bg = "panel",
+		radius = 1,
+		Parent = chip,
+	})
+	-- and the tab underneath, half out of the bottom edge
+	b.new("Frame", {
+		Size = UDim2.fromOffset(14, 3),
+		Position = UDim2.fromOffset(9, 24),
+		bg = paint,
+		radius = 1,
 		Parent = row,
 	})
 
-	b.mono({
+	b.text({
 		Text = def.label,
-		Size = UDim2.new(1, -48, 1, 0),
-		Position = UDim2.fromOffset(12, 0),
+		Size = UDim2.new(1, -22, 1, -4),
+		Position = UDim2.fromOffset(10, 3),
+		Font = a.font.uiMedium,
 		TextSize = 12,
-		fg = "text",
+		fg = function() return a.inkOn(a.blockColor(def.cat)) end,
 		TextTruncate = Enum.TextTruncate.AtEnd,
-		Parent = row,
+		Parent = chip,
 	})
 
 	-- starring keeps a block at the top of the palette
 	local favourites = self.app.settings.favourites or {}
 	local star = b.new("TextButton", {
-		Size = UDim2.fromOffset(18, 24),
-		Position = UDim2.new(1, -38, 0, 0),
+		Size = UDim2.fromOffset(18, 30),
+		Position = UDim2.new(1, -40, 0, 0),
 		bg = "panel",
 		BackgroundTransparency = 1,
 		Parent = row,
@@ -131,7 +151,7 @@ function View:blockRow(def, order)
 
 	local plus = b.mono({
 		Text = ">",
-		Size = UDim2.fromOffset(16, 24),
+		Size = UDim2.fromOffset(16, 30),
 		Position = UDim2.new(1, -18, 0, 0),
 		TextSize = 12,
 		fg = "text3",
