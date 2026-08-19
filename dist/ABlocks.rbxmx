@@ -89,7 +89,9 @@ end)
 -- editors: ink-on-paper colours, hairline rules instead of borders and drop
 -- shadows, sharp corners, a single ochre accent, and monospace for anything
 -- that is really code.  Category colours are printing inks -- muted, so a
--- canvas full of blocks reads as a document rather than a bag of sweets.
+-- canvas full of blocks reads as a document rather than a bag of sweets.  Every
+-- category has its own; they are close together on purpose, because the spine
+-- is a reminder of which subject a block came from rather than a label.
 --
 -- Instances register the token they are painted with, so switching between the
 -- ink and paper themes repaints the whole plugin without rebuilding it.
@@ -130,6 +132,24 @@ local INK = {
 			inst = Color3.fromRGB(154, 139, 106),
 			player = Color3.fromRGB(200, 110, 140),
 			data = Color3.fromRGB(107, 122, 143),
+
+			ui = Color3.fromRGB(70, 150, 165),
+			camera = Color3.fromRGB(196, 168, 92),
+			sound = Color3.fromRGB(160, 118, 196),
+			save = Color3.fromRGB(96, 148, 112),
+			net = Color3.fromRGB(86, 152, 190),
+			shop = Color3.fromRGB(204, 128, 70),
+			place = Color3.fromRGB(92, 160, 140),
+			phys = Color3.fromRGB(198, 108, 84),
+			anim = Color3.fromRGB(190, 100, 150),
+			npc = Color3.fromRGB(150, 156, 88),
+			terrain = Color3.fromRGB(160, 128, 92),
+			algo = Color3.fromRGB(108, 122, 196),
+			pattern = Color3.fromRGB(170, 112, 178),
+			vec = Color3.fromRGB(98, 138, 186),
+			debug = Color3.fromRGB(128, 146, 138),
+
+			custom = Color3.fromRGB(196, 174, 120),
 			special = Color3.fromRGB(120, 124, 132),
 		},
 		syntax = {
@@ -177,6 +197,24 @@ local PAPER = {
 			inst = Color3.fromRGB(116, 100, 62),
 			player = Color3.fromRGB(163, 68, 100),
 			data = Color3.fromRGB(70, 86, 110),
+
+			ui = Color3.fromRGB(40, 118, 132),
+			camera = Color3.fromRGB(150, 122, 42),
+			sound = Color3.fromRGB(118, 78, 158),
+			save = Color3.fromRGB(58, 110, 76),
+			net = Color3.fromRGB(48, 112, 150),
+			shop = Color3.fromRGB(160, 90, 34),
+			place = Color3.fromRGB(52, 120, 100),
+			phys = Color3.fromRGB(162, 74, 50),
+			anim = Color3.fromRGB(150, 62, 112),
+			npc = Color3.fromRGB(108, 114, 48),
+			terrain = Color3.fromRGB(120, 90, 56),
+			algo = Color3.fromRGB(70, 84, 158),
+			pattern = Color3.fromRGB(130, 74, 140),
+			vec = Color3.fromRGB(60, 100, 148),
+			debug = Color3.fromRGB(86, 104, 96),
+
+			custom = Color3.fromRGB(140, 118, 62),
 			special = Color3.fromRGB(96, 100, 108),
 		},
 		syntax = {
@@ -2040,6 +2078,20 @@ function c.get(id)
 		return c.defs[id]
 end
 
+-- Custom blocks come and go as they are edited, so the registry has to be able
+-- to forget one.
+function c.undefine(id)
+		if not c.defs[id] then return false end
+		c.defs[id] = nil
+		for index, def in ipairs(c.order) do
+			if def.id == id then
+				table.remove(c.order, index)
+				break
+			end
+		end
+		return true
+end
+
 function c.byCat(catId)
 		local out = {}
 		for _, def in ipairs(c.order) do
@@ -2497,6 +2549,9 @@ function d.toSave(doc)
 			name = doc.name,
 			nextId = doc.nextId,
 			origin = doc.origin,
+			-- Custom blocks the document uses travel with it, so opening someone
+			-- else's project adds their blocks rather than breaking.
+			customs = doc.customs,
 			blocks = blocks,
 			stacks = stacks,
 		}
@@ -2510,6 +2565,9 @@ function d.fromSave(saved)
 
 		local doc = d.newDoc(saved.name)
 		doc.nextId = saved.nextId or 1
+		if type(saved.customs) == "table" then
+			doc.customs = saved.customs
+		end
 		if type(saved.origin) == "table" and saved.origin.kind then
 			doc.origin = {
 				kind = saved.origin.kind,
@@ -2613,6 +2671,8 @@ local function newWriter()
 			depth = 0,
 			needs = {},
 			declared = {},
+			declaredFunctions = {},
+			helpers = {},
 		}, Writer)
 end
 
@@ -2627,6 +2687,10 @@ function Writer:line(text, owner)
 		-- Notice services the author declared by hand so the preamble stays quiet.
 		local name = string.match(body, '^local%s+([%a_][%w_]*)%s*=%s*game:GetService')
 		if name then self.declared[name] = true end
+		-- Same for functions: a custom block's helper is not written twice if the
+		-- document already defines one by that name.
+		local fn = string.match(body, "^local%s+function%s+([%a_][%w_]*)")
+		if fn then self.declaredFunctions[fn] = true end
 		return #self.lines
 end
 
@@ -2698,6 +2762,26 @@ local function emitBlock(w, doc, block)
 			return
 		end
 
+		-- Custom blocks with no slots compile to one function at the top and a
+		-- call here; ones with slots fall through and inline, because what goes
+		-- inside them changes from use to use.
+		local custom = def.custom
+		if custom and (custom.helper or custom.returnsHelper) then
+			local args = {}
+			for _, key in ipairs(custom.params) do
+				args[#args + 1] = c.fieldValue(def, block, key)
+			end
+			local call = custom.fn .. "(" .. table.concat(args, ", ") .. ")"
+			w.helpers[custom.fn] = custom
+			if custom.returnsHelper then
+				w:line("local " .. c.fieldValue(def, block, custom.out) .. " = " .. call,
+					block.id)
+			else
+				w:line(call, block.id)
+			end
+			return
+		end
+
 		if def.elseifCollapse then
 			emitIfChain(w, doc, block, "if")
 			w:line("end", block.id)
@@ -2709,10 +2793,13 @@ local function emitBlock(w, doc, block)
 		end
 
 		for _, slot in ipairs(def.slots) do
-			if slot.codePre then
+			local lead = slot.codePreLines or (slot.codePre and { slot.codePre })
+			if lead then
 				local at = slot.codeIndent or (def.bodyIndent - 1)
 				w:push(at)
-				w:line(fillLine(def, block, slot.codePre), block.id)
+				for _, line in ipairs(lead) do
+					w:tpl(fillLine(def, block, line), block.id)
+				end
 				w:pop(at)
 			end
 			w:push(def.bodyIndent)
@@ -2764,6 +2851,36 @@ function e.generate(doc, opts)
 				string.format('local %s = game:GetService("%s")', service, service)
 		end
 
+		-- helper functions for the custom blocks that were used
+		local helperNames = {}
+		for name in pairs(w.helpers) do
+			if not w.declaredFunctions[name] then helperNames[#helperNames + 1] = name end
+		end
+		table.sort(helperNames)
+
+		local helpers = {}
+		for _, name in ipairs(helperNames) do
+			local custom = w.helpers[name]
+			helpers[#helpers + 1] = string.format("local function %s(%s)", name,
+				table.concat(custom.params, ", "))
+			for _, line in ipairs(custom.body) do
+				-- inside the helper the placeholders are simply its parameters
+				local filled = string.gsub(line, "{([%a_][%w_]*)}", "%1")
+				helpers[#helpers + 1] = filled == "" and "" or ("\t" .. filled)
+			end
+			if custom.returns then
+				-- a value-producing block's body is the expression to hand back
+				helpers[#helpers] = nil
+				local body = {}
+				for _, line in ipairs(custom.body) do
+					body[#body + 1] = (string.gsub(line, "{([%a_][%w_]*)}", "%1"))
+				end
+				helpers[#helpers + 1] = "\treturn " .. table.concat(body, " ")
+			end
+			helpers[#helpers + 1] = "end"
+			helpers[#helpers + 1] = ""
+		end
+
 		local head = {}
 		if opts.header ~= false then
 			head[#head + 1] = "-- " .. (doc.name or "Untitled")
@@ -2774,6 +2891,7 @@ function e.generate(doc, opts)
 			for _, line in ipairs(preamble) do head[#head + 1] = line end
 			head[#head + 1] = ""
 		end
+		for _, line in ipairs(helpers) do head[#head + 1] = line end
 
 		local out = {}
 		local blockOfLine = {}
@@ -4131,10 +4249,39 @@ local function convertConnect(ctx, call, verb)
 		return fill(ctx, mk(ctx, kind, fields), "body", body)
 end
 
+-- Custom blocks compile to a call to a named helper, so a call to one of those
+-- names rebuilds the block rather than arriving as a plain call.
+local function customByFunctionName()
+		local map = {}
+		for _, def in ipairs(c.order) do
+			if def.custom and def.custom.fn then map[def.custom.fn] = def end
+		end
+		return map
+end
+
+local function convertCustomCall(ctx, call, path, wanted)
+		if not path then return nil end
+		local def = customByFunctionName()[path]
+		if not def then return nil end
+		if def.custom.returnsHelper ~= (wanted == "value") then return nil end
+		if #call.args ~= #def.custom.params then return nil end
+
+		local fields = {}
+		for index, key in ipairs(def.custom.params) do
+			fields[key] = slice(ctx, call.args[index])
+		end
+		return def, fields
+end
+
 local function convertCallStatement(ctx, stmt)
 		local call = stmt.call
 		local args = call.args
 		local path = not call.method and g.pathOf(call.fn) or nil
+
+		local customDef, customFields = convertCustomCall(ctx, call, path, "statement")
+		if customDef then
+			return mk(ctx, customDef.id, customFields)
+		end
 
 		-- event connections
 		if (call.method == "Connect" or call.method == "Once")
@@ -4254,6 +4401,15 @@ local function convertLocal(ctx, stmt)
 			local name = names[1].name
 			local value = exprs[1]
 			local valueText = slice(ctx, value)
+
+			if value.k == "call" then
+				local customDef, customFields = convertCustomCall(ctx, value,
+					not value.method and g.pathOf(value.fn) or nil, "value")
+				if customDef then
+					customFields.out = name
+					return mk(ctx, customDef.id, customFields)
+				end
+			end
 
 			if isCallTo(value, "Instance.new") and #value.args == 1 then
 				local class = plainString(value.args[1])
@@ -4711,6 +4867,7 @@ return h
 --   result.items[1].name  --> "Anchored"
 
 local d = require(script.Parent.d)
+local q = require(script.Parent.q)
 
 local i = {}
 
@@ -5361,6 +5518,27 @@ local function addDocSymbols(items, query, doc)
 		end
 end
 
+-- Blocks you made yourself that carry no slots become a real `local function`
+-- in the generated script, so their names are worth completing: this is how
+-- you call one of your own blocks from inside a field.
+local function addCustomHelpers(items, query)
+		for _, custom in ipairs(q.list()) do
+			if q.isHelper(custom) and custom.fn then
+				local names = {}
+				for _, field in ipairs(custom.fields) do names[#names + 1] = field.key end
+				local signature = custom.fn .. "(" .. table.concat(names, ", ") .. ")"
+				push(items, {
+					name = custom.fn,
+					kind = "function",
+					detail = signature,
+					doc = "Your block \"" .. custom.label .. "\". It is written into " ..
+						"the script as a function the first time you use it.",
+					insert = custom.fn .. "(",
+				}, query)
+			end
+		end
+end
+
 --=============================================================================
 -- entry point
 --=============================================================================
@@ -5482,6 +5660,7 @@ function i.complete(request)
 		end
 
 		addDocSymbols(items, context.query, doc)
+		addCustomHelpers(items, context.query)
 		addGlobals(items, context.query)
 		for _, snippet in ipairs(SNIPPETS) do
 			push(items, {
@@ -5566,7 +5745,8 @@ return i
 				<ProtectedString name="Source"><![CDATA[--!nonstrict
 -- j  ·  tutorial content
 --
--- Twenty-six lessons: one per teaching category, then sixteen on the craft of
+-- Thirty-two lessons: one for each of the ten teaching categories, five more
+-- for the bigger systems people reach for next, and seventeen on the craft of
 -- using the editor and of writing Roblox code that behaves.
 --
 -- A step is a small tagged table, rendered by `k`:
@@ -6353,7 +6533,8 @@ T{
 		title = "The escape hatch",
 		blurb = "One block that takes any Luau at all, for when the palette runs out.",
 		steps = {
-			{ p = "There are 127 blocks. There are considerably more than 127 things you might want to write. The `raw Luau` block takes whatever you type and puts it in the output untouched, at the right indentation." },
+			{ p = "There are 680 blocks. There are considerably more than 680 things you might want to write. The `raw Luau` block takes whatever you type and puts it in the output untouched, at the right indentation." },
+			{ p = "Before reaching for it twice, though, consider making a block of your own. A custom block is the same raw Luau with named holes in it, and it gets a name, a place in the palette and a tooltip. The second time you write something is the moment to turn it into a block." },
 			{ blocks = "raw,comment" },
 			{ h = "What it is for" },
 			{ list = {
@@ -6505,6 +6686,303 @@ T{
 			} },
 			{ note = "You can come back. Select the script, convert it, rearrange it visually, and press Update to write it straight back. The round trip is stable, so a script can go through the blocks and come out as the same script." },
 		},
+}
+
+--=============================================================================
+-- lessons for the bigger systems
+--
+-- The ten teaching categories each get a lesson because they are the grammar.
+-- These five are the systems people reach for next, and each has a trap in it
+-- that costs a weekend to find on your own.
+--=============================================================================
+
+T{
+		id = "cat-ui", kind = "category", cat = "ui", minutes = 6,
+		level = "build",
+		title = "Interface: screens, buttons and text",
+		blurb = "Everything a player reads or clicks lives in their own copy of the screen, which changes where the code goes.",
+		steps = {
+			{ p = "A ScreenGui is a container Roblox draws flat on top of the 3D view. It goes in the player's PlayerGui, which belongs to that one player: change something in there and nobody else sees it. That single fact decides almost everything about interface code -- it runs on the player's own machine, in a LocalScript, and the server never sees the result." },
+			{ h = "Where the interface lives" },
+			{ p = "A ScreenGui holds frames, labels, buttons and images. Each of those is a GuiObject, and every GuiObject has a Position and a Size. Put the ScreenGui in StarterGui and Roblox copies it into each player as they arrive, or build it from a LocalScript and parent it to PlayerGui yourself." },
+			{ blocks = "uiScreen,uiLabel,uiButton,uiOnClick,uiPos,uiSize" },
+			{ code = 'local player = game:GetService("Players").LocalPlayer\nlocal gui = Instance.new("ScreenGui")\ngui.Parent = player:WaitForChild("PlayerGui")' },
+			{ h = "Scale and offset, and why both exist" },
+			{ p = "A UDim2 has two numbers per axis: a scale, which is a fraction of the parent, and an offset, which is a count of pixels. Scale keeps a layout looking the same on a phone and on a monitor. Offset keeps a border exactly two pixels thick no matter the screen. Most things want scale for position and size, and offset only for padding and outlines." },
+			{ code = 'label.Size = UDim2.fromScale(0.25, 0.08)\nlabel.Position = UDim2.fromScale(0.02, 0.02)\nlabel.BackgroundTransparency = 0.3' },
+			{ note = "The blocks come in pairs for this reason: `set {gui} size to {x} by {y}` takes fractions, and `set {gui} size to {w} by {h} pixels` takes pixels. Pick whichever the thing you are sizing actually cares about." },
+			{ h = "Reacting to a click" },
+			{ p = "A TextButton or ImageButton fires Activated when it is pressed, and that covers mouse, touch and gamepad in one event. There is also MouseButton1Click, which only covers the mouse -- prefer Activated unless you specifically want to exclude a phone." },
+			{ code = 'button.Activated:Connect(function()\n\tscore += 1\n\tlabel.Text = tostring(score)\nend)' },
+			{ warn = "A button on a player's screen is not proof of anything. If clicking it should cost coins or give an item, the click has to travel to the server through a RemoteEvent and be checked there. Anything decided only on the player's machine can be decided differently by a player who is cheating." },
+			{ try = "Build a score counter: a label, a button that adds one, and a second button that resets it. Then look at the Luau panel and notice that none of it touches the server." },
+		},
+		example = [[
+local Players = game:GetService("Players")
+
+local player = Players.LocalPlayer
+local gui = Instance.new("ScreenGui")
+gui.Name = "Score"
+gui.ResetOnSpawn = false
+gui.Parent = player:WaitForChild("PlayerGui")
+
+local label = Instance.new("TextLabel")
+label.Size = UDim2.fromScale(0.25, 0.08)
+label.Position = UDim2.fromScale(0.02, 0.02)
+label.BackgroundTransparency = 0.3
+label.Text = "0"
+label.Parent = gui
+
+local button = Instance.new("TextButton")
+button.Size = UDim2.fromOffset(120, 36)
+button.Position = UDim2.fromScale(0.02, 0.12)
+button.Text = "add one"
+button.Parent = gui
+
+local score = 0
+
+button.Activated:Connect(function()
+		score += 1
+		label.Text = tostring(score)
+end)
+]],
+}
+
+T{
+		id = "cat-save", kind = "category", cat = "save", minutes = 6,
+		level = "deep",
+		title = "Saving: data that outlives the round",
+		blurb = "A DataStore is the only place a number survives a player leaving, and it is the one place that is allowed to fail.",
+		steps = {
+			{ p = "Everything in a running Roblox place disappears when the server shuts down. A DataStore is a small key-value store that does not: you hand it a key and a value, and hours later on another server the same key gives the value back. It is the only Roblox feature that talks to a machine you do not control, and that changes how you have to write against it." },
+			{ h = "Get the store once, use the key every time" },
+			{ p = "GetDataStore names a store; the key names one player's slot inside it. Almost everyone uses the player's UserId in the key, because names change and UserIds do not. Build the key in one small function so every read and write agrees on its shape." },
+			{ blocks = "saveStore,saveKeyFor,saveLoad,saveSet,saveOnJoin,saveOnLeave" },
+			{ code = 'local store = DataStoreService:GetDataStore("Coins")\n\nlocal function keyFor(player)\n\treturn "player_" .. player.UserId\nend' },
+			{ h = "Every call can fail" },
+			{ p = "GetAsync and SetAsync go over the network. They can time out, they can be throttled, and they throw when they do. A DataStore call that is not wrapped in pcall will one day take your whole PlayerAdded handler down with it, and every player after that point joins with nothing." },
+			{ code = 'local ok, saved = pcall(function()\n\treturn store:GetAsync(keyFor(player))\nend)\nif not ok then\n\twarn("could not load")\nend' },
+			{ note = "`saved` is nil for a brand new player, and that is not an error -- it means there is nothing stored yet. Treat nil as your starting value rather than as a failure, and keep the two cases apart, because saving over a failed load is how progress gets erased." },
+			{ h = "Save on the way out, and on the way down" },
+			{ p = "PlayerRemoving fires when someone leaves. BindToClose fires when the whole server is shutting down, and it is your last chance to write anything -- Roblox waits a few seconds for it and then stops caring. A game that only saves on PlayerRemoving loses the last session of everyone who was still online at shutdown." },
+			{ warn = "There is a request budget, and it is smaller than it looks: roughly one write per key every six seconds. Saving on every coin pickup will be throttled and then dropped. Keep the value in memory, and write it on a timer and on the way out." },
+			{ try = "Give a player a Coins value that loads when they join and saves when they leave, then rejoin and check the number came back. Test it in Studio with Game Settings, Security, Enable Studio Access to API Services turned on." },
+		},
+		example = [[
+local DataStoreService = game:GetService("DataStoreService")
+local Players = game:GetService("Players")
+
+local store = DataStoreService:GetDataStore("Coins")
+
+local function keyFor(player)
+		return "player_" .. player.UserId
+end
+
+Players.PlayerAdded:Connect(function(player)
+		local ok, saved = pcall(function()
+			return store:GetAsync(keyFor(player))
+		end)
+
+		local coins = Instance.new("IntValue")
+		coins.Name = "Coins"
+		coins.Value = 0
+		coins.Parent = player
+
+		if ok and saved then
+			coins.Value = saved
+		end
+end)
+
+Players.PlayerRemoving:Connect(function(player)
+		local coins = player:FindFirstChild("Coins")
+		if coins then
+			pcall(function()
+				store:SetAsync(keyFor(player), coins.Value)
+			end)
+		end
+end)
+]],
+}
+
+T{
+		id = "cat-net", kind = "category", cat = "net", minutes = 6,
+		level = "deep",
+		title = "Networking: the server and the player",
+		blurb = "Two machines, one game. A RemoteEvent is the only door between them, and it does not lock itself.",
+		steps = {
+			{ p = "A Roblox game runs in two places at once. The server holds the truth: who has what, where everything is, what counts as a score. Each player's own machine runs a copy that draws the world and reads their keyboard. Neither can see the other's variables. A RemoteEvent is the door between them." },
+			{ h = "Which way the message goes" },
+			{ p = "The same RemoteEvent object is used from both sides, but the calls have different names depending on which way you are shouting. From a LocalScript you FireServer, and the server hears OnServerEvent. From the server you FireClient at one player or FireAllClients at everybody, and their LocalScripts hear OnClientEvent." },
+			{ blocks = "netMakeEvent,netToServer,netOnServerMessage,netToOne,netToAll,netOnClientMessage" },
+			{ code = 'remote.OnServerEvent:Connect(function(player, itemName)\n\tprint(player.Name .. " wants " .. itemName)\nend)' },
+			{ note = "The server always gets the player as the first argument, and it is added by Roblox rather than by the sender. That one argument is the only thing in the whole message you can trust, because a cheating player cannot forge it." },
+			{ h = "Everything else is a lie until you check it" },
+			{ p = "The arguments after that player came from someone else's machine, and a modified client can send anything at all: a number where you expected a string, a table a thousand entries deep, the name of an item that costs nothing. Check the type, check the value is one you actually sell, and check they can afford it -- on the server, every time." },
+			{ code = 'if typeof(itemName) ~= "string" then\n\treturn\nend\nif not SHOP[itemName] then\n\treturn\nend' },
+			{ warn = "A RemoteEvent can also be fired as fast as a script can loop. If yours does anything expensive, keep the time of each player's last call and drop anything that arrives too soon after it. Without that, one player can spend your whole server." },
+			{ h = "When you need an answer back" },
+			{ p = "A RemoteFunction waits for a reply, which is occasionally what you want and usually a trap: if the far side is slow, your code is stopped until it answers, and a client that never answers stops a server thread for good. Prefer two RemoteEvents -- one asking, one telling -- unless the reply is genuinely immediate." },
+			{ try = "Make a shop: a LocalScript that fires the server with an item name, and a server script that checks the name is one of three real items before printing the sale. Then try firing it with a number and watch your check catch it." },
+		},
+		example = [[
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+
+local remote = Instance.new("RemoteEvent")
+remote.Name = "BuyItem"
+remote.Parent = ReplicatedStorage
+
+local lastCall = {}
+
+remote.OnServerEvent:Connect(function(player, itemName)
+		if typeof(itemName) ~= "string" then
+			return
+		end
+
+		local now = os.clock()
+		local previous = lastCall[player.UserId]
+		if previous and now - previous < 0.5 then
+			return
+		end
+
+		lastCall[player.UserId] = now
+		print(player.Name .. " asked to buy " .. itemName)
+end)
+]],
+}
+
+T{
+		id = "cat-phys", kind = "category", cat = "phys", minutes = 6,
+		level = "build",
+		title = "Physics: pushing things about",
+		blurb = "Anchored parts sit still and unanchored parts fall. Everything else is a question of which force you reach for.",
+		steps = {
+			{ p = "A part is either anchored, in which case it stays exactly where you put it and nothing can move it, or it is not, in which case Roblox works out where it should be sixty times a second. Almost every physics problem starts with a part being in the wrong one of those two states." },
+			{ h = "Forces, not positions" },
+			{ p = "You can set a part's Position directly, but on an unanchored part that fights the simulation and looks like it. To move something physically you apply a force and let Roblox do the rest: an impulse for a single shove, a LinearVelocity for a steady push, an AlignPosition to drag something towards a point." },
+			{ blocks = "physPush,physKeepMoving,physHoldAt,physSpin,physStop" },
+			{ code = 'local push = Instance.new("LinearVelocity")\npush.VectorVelocity = Vector3.new(0, 0, -40)\npush.MaxForce = 20000\npush.Parent = part' },
+			{ note = "These movers attach to the part through an Attachment rather than to the part itself, which is why the blocks make one for you. The older BodyVelocity and BodyPosition still work but are deprecated, so the blocks here write the modern ones." },
+			{ h = "Asking what is there" },
+			{ p = "A raycast is a straight line thrown into the world that reports the first thing it hits. It is how a gun knows what it shot, how a foot knows what it is standing on, and how a camera knows a wall is in the way. You give it a start, a direction whose length is the range, and a list of things to ignore." },
+			{ code = 'local params = RaycastParams.new()\nparams.FilterDescendantsInstances = { character }\nlocal hit = workspace:Raycast(origin, Vector3.new(0, -5, 0), params)' },
+			{ p = "The result is nil when the ray hit nothing, so every raycast is followed by a check. When it did hit, the result carries the Instance, the Position where it landed and the Normal of the surface -- enough to place a bullet hole facing the right way." },
+			{ warn = "Collision groups are the quiet fix for most physics annoyances. If players are catching on scenery, or bullets are stopping on the shooter, the answer is usually two groups told to ignore each other rather than more code." },
+			{ try = "Make a launch pad: a part that, when touched, throws whatever touched it upwards with an impulse. Then add a check so it only launches characters." },
+		},
+		example = [[
+local part = script.Parent
+
+part.Anchored = false
+part.CanCollide = true
+
+local attachment = Instance.new("Attachment")
+attachment.Parent = part
+
+local push = Instance.new("LinearVelocity")
+push.Attachment0 = attachment
+push.VectorVelocity = Vector3.new(0, 0, -40)
+push.MaxForce = 20000
+push.Parent = part
+
+part.Touched:Connect(function(hit)
+		local humanoid = hit.Parent:FindFirstChildOfClass("Humanoid")
+		if humanoid then
+			local root = humanoid.RootPart
+			root:ApplyImpulse(Vector3.new(0, 600, 0))
+		end
+end)
+]],
+}
+
+T{
+		id = "cat-anim", kind = "category", cat = "anim", minutes = 6,
+		level = "build",
+		title = "Animation: making a character move",
+		blurb = "An Animation is an asset, a track is a copy of it playing on one character, and mixing those two up is the usual bug.",
+		steps = {
+			{ p = "An Animation instance is not a moving thing. It is a pointer at an asset you uploaded, and on its own it does nothing at all. To see movement you load it onto a particular character's Animator, which hands back an AnimationTrack: that track is the copy that is actually playing, and it is the thing you play, stop and speed up." },
+			{ h = "Load once, keep the track" },
+			{ p = "LoadAnimation is not free, and loading the same animation twice gives you two tracks that will fight each other. Load each animation once when the character appears, keep the track in a variable, and play that same track every time you need it." },
+			{ blocks = "animLoad,animPlay,animStop,animSpeed,animLoop" },
+			{ code = 'local animator = humanoid:WaitForChild("Animator")\nlocal track = animator:LoadAnimation(wave)\ntrack:Play()' },
+			{ note = "Load onto the Animator, not onto the Humanoid. Humanoid:LoadAnimation still works and is deprecated; the Animator is the object that actually owns playback, and on the client it is the only one that replicates properly." },
+			{ h = "Priority decides who wins" },
+			{ p = "Several tracks can play on one character at once, and priority settles what happens when they disagree about an arm. Idle loses to Movement, which loses to Action, which loses to Action4. A wave that plays but cannot be seen is nearly always a wave sitting at Idle underneath the walk cycle." },
+			{ code = 'track.Priority = Enum.AnimationPriority.Action\ntrack.Looped = false' },
+			{ h = "Characters come and go" },
+			{ p = "Every respawn is a brand new character model with a brand new Humanoid and Animator, and every track you loaded onto the old one is gone. Anything that sets up animations has to hang off CharacterAdded, and it has to run for the character that is already there when the script starts." },
+			{ warn = "An animation only plays if you own the asset or it belongs to the group the game belongs to. An animation that works in Studio and does nothing in a live game is almost always this, not your code." },
+			{ try = "Load a wave animation on spawn, play it when the player presses a key, and stop it when they move. You will need one track kept in a variable and two events." },
+		},
+		example = [[
+local Players = game:GetService("Players")
+
+local function setUp(character)
+		local humanoid = character:WaitForChild("Humanoid")
+		local animator = humanoid:WaitForChild("Animator")
+
+		local wave = Instance.new("Animation")
+		wave.AnimationId = "rbxassetid://507770239"
+
+		local track = animator:LoadAnimation(wave)
+		track.Priority = Enum.AnimationPriority.Action
+		track.Looped = false
+
+		humanoid.Died:Connect(function()
+			track:Stop()
+		end)
+
+		track:Play()
+end
+
+Players.PlayerAdded:Connect(function(player)
+		player.CharacterAdded:Connect(setUp)
+end)
+]],
+}
+
+T{
+		id = "tip-custom", kind = "tip", minutes = 5, level = "build",
+		title = "Blocks of your own",
+		blurb = "When you have written the same four blocks three times, turn them into one block and stop writing them.",
+		steps = {
+			{ p = "The palette covers the language and most of the Roblox API, but it does not cover your game. The bit you write over and over -- award coins, respawn at a checkpoint, fade a label out and back -- is yours, and you can make it a block." },
+			{ h = "What a block of yours actually is" },
+			{ p = "One thing: Luau with holes in it. Anywhere you write a name in curly brackets, you get a field on the block to fill in. That is the whole idea, and it is why there is no separate language to learn for making blocks." },
+			{ code = '{who}.Humanoid.Health += {amount}', partial = true },
+			{ p = "That becomes a block reading `Heal someone {who} {amount}` with two boxes on it. Type a character into one and a number into the other and it writes the line back out with your text in the holes." },
+			{ h = "A hole on its own line is a place for blocks" },
+			{ p = "There is one exception to the rule above, and it earns its keep. If a placeholder sits alone on a line with nothing else, it becomes a slot -- a mouth the block opens so you can drop other blocks inside it, the same way an if block does." },
+			{ code = 'if {who}:GetAttribute("Admin") then\n\t{body}\nend', partial = true },
+			{ h = "Four ways to get one" },
+			{ list = {
+				"Write the Luau yourself, with New block in the palette.",
+				"Select a stack on the canvas and choose Make into a block; the code it writes becomes the block.",
+				"Point at a define block and get a block that calls that function.",
+				"Point at a ModuleScript and get one block per function it exports.",
+			} },
+			{ p = "Whichever route you take, you land in the same editor, with the Luau in front of you and a live preview of what the block will read like on the canvas." },
+			{ h = "What it does to the generated script" },
+			{ p = "A block with no slots is written into your script once, as a real local function, no matter how many times you use it -- so ten uses cost you one function and ten short calls. A block with slots has to be written out in full at each use, because the blocks you dropped inside it are different every time." },
+			{ note = "You can open one of your blocks as a canvas and edit its insides with blocks, then save it back. The placeholders come along as ordinary names while you are in there, so they survive the trip." },
+			{ warn = "Your blocks live in your Studio, not in the place file. When one is worth keeping, use Save to a ModuleScript in setup: that writes the whole library into a script you can commit, share, or drop into another game." },
+			{ try = "Find something you have built twice. Select it, make it into a block, and use it in both places. Then look at the Luau and count how many times the body appears." },
+		},
+		example = [[
+local function healSomeone(who, amount)
+		who.Humanoid.Health += amount
+end
+
+local part = script.Parent
+
+part.Touched:Connect(function(hit)
+		local character = hit.Parent
+		local humanoid = character:FindFirstChild("Humanoid")
+		if humanoid then
+			healSomeone(character, 10)
+		end
+end)
+]],
 }
 
 --=============================================================================
@@ -6910,7 +7388,7 @@ function View:showTutorial(entry)
 			if cat then
 				b.micro(cat.name .. " blocks", {
 					Size = UDim2.fromOffset(140, 16),
-					fg = function(theme) return theme.cats[cat.id] end,
+					fg = function(theme) return theme.cats[cat.id] or theme.text2 end,
 					LayoutOrder = 4,
 					Parent = meta,
 				})
@@ -7309,24 +7787,27 @@ return k
 				<ProtectedString name="Source"><![CDATA[--!nonstrict
 -- l  ·  the palette
 --
--- The list of blocks on the left.  Categories behave as an accordion -- one
--- open at a time -- and the search box collapses the whole thing into one
--- ranked list.  Search matches the wording on the block, the Luau it writes and
--- its description, so `connect` finds the event blocks even though none of them
--- say "connect" on the front.
+-- Seven hundred blocks need more than one long list, so this has four things
+-- the old palette did not: subgroups inside each category, a strip of recent
+-- and starred blocks at the top, search results grouped by category, and a
+-- filter that hides server-only blocks while you are building a LocalScript.
 --
 -- A row can be clicked (drops the block on the canvas near your selection) or
--- dragged straight onto the canvas.
+-- dragged straight onto it.  Your own blocks live in their own category, with
+-- the group names you gave them.
 
 local a = require(script.Parent.a)
 local b = require(script.Parent.b)
 local c = require(script.Parent.c)
 local i = require(script.Parent.i)
+local q = require(script.Parent.q)
 
 local UserInputService = game:GetService("UserInputService")
 local RunService = game:GetService("RunService")
 
 local l = {}
+
+local RECENT_LIMIT = 6
 
 local View = {}
 View.__index = View
@@ -7342,7 +7823,6 @@ local function rank(query, def)
 		if string.find(def.searchText, query, 1, true) then
 			best = math.max(best or 0, 24)
 		end
-		-- the first word of the label matching is worth more than a scattered hit
 		local firstWord = string.match(def.label, "^%S+")
 		if firstWord and string.sub(string.lower(firstWord), 1, #query) == query then
 			best = (best or 0) + 30
@@ -7350,13 +7830,15 @@ local function rank(query, def)
 		return best
 end
 
-function l.search(query)
+function l.search(query, allowed)
 		query = string.lower(string.match(query or "", "^%s*(.-)%s*$"))
 		if query == "" then return nil end
 		local hits = {}
 		for _, def in ipairs(c.order) do
-			local score = rank(query, def)
-			if score then hits[#hits + 1] = { def = def, score = score } end
+			if not allowed or allowed(def) then
+				local score = rank(query, def)
+				if score then hits[#hits + 1] = { def = def, score = score } end
+			end
 		end
 		table.sort(hits, function(x, y)
 			if x.score ~= y.score then return x.score > y.score end
@@ -7368,24 +7850,21 @@ function l.search(query)
 end
 
 --=============================================================================
--- rows
+-- what belongs in this project
 --=============================================================================
 
--- The Luau a block writes, with its defaults filled in -- shown in the tooltip
--- so you can see what you are about to add.
-local function sampleCode(def)
-		local lines = {}
-		for _, template in ipairs(def.codeLines) do
-			lines[#lines + 1] = (string.gsub(
-				c.fill(c.parseTemplate(template), def, { f = {} }), "^\t", ""))
-		end
-		if #def.slots > 0 then lines[#lines + 1] = "\t..." end
-		for _, template in ipairs(def.codeTailLines or {}) do
-			lines[#lines + 1] = (string.gsub(
-				c.fill(c.parseTemplate(template), def, { f = {} }), "^\t", ""))
-		end
-		return table.concat(lines, "\n")
+function View:allows(def)
+		if not self.app.settings.filterBySide then return true end
+		if not def.side then return true end
+		local kind = self.app:scriptKind()
+		if kind == "LocalScript" then return def.side ~= "server" end
+		if kind == "Script" then return def.side ~= "client" end
+		return true
 end
+
+--=============================================================================
+-- rows
+--=============================================================================
 
 function View:blockRow(def, order)
 		local row = b.new("TextButton", {
@@ -7404,7 +7883,7 @@ function View:blockRow(def, order)
 
 		b.mono({
 			Text = def.label,
-			Size = UDim2.new(1, -34, 1, 0),
+			Size = UDim2.new(1, -48, 1, 0),
 			Position = UDim2.fromOffset(12, 0),
 			TextSize = 12,
 			fg = "text",
@@ -7412,11 +7891,35 @@ function View:blockRow(def, order)
 			Parent = row,
 		})
 
-		local plus = b.mono({
+		-- starring keeps a block at the top of the palette
+		local favourites = self.app.settings.favourites or {}
+		local star = b.new("TextButton", {
+			Size = UDim2.fromOffset(18, 24),
+			Position = UDim2.new(1, -38, 0, 0),
+			bg = "panel",
+			BackgroundTransparency = 1,
+			Parent = row,
+		})
+		local starMark = b.mono({
 			Text = "+",
+			Size = UDim2.fromScale(1, 1),
+			TextSize = 13,
+			fg = favourites[def.id] and "accent" or "text3",
+			TextTransparency = favourites[def.id] and 0 or 1,
+			TextXAlignment = Enum.TextXAlignment.Center,
+			Parent = star,
+		})
+		b.tip(star, favourites[def.id] and "Remove from your starred blocks."
+			or "Keep this block at the top of the palette.")
+		star.MouseButton1Click:Connect(function()
+			self:toggleFavourite(def.id)
+		end)
+
+		local plus = b.mono({
+			Text = ">",
 			Size = UDim2.fromOffset(16, 24),
-			Position = UDim2.new(1, -20, 0, 0),
-			TextSize = 14,
+			Position = UDim2.new(1, -18, 0, 0),
+			TextSize = 12,
 			fg = "text3",
 			TextXAlignment = Enum.TextXAlignment.Center,
 			TextTransparency = 1,
@@ -7426,13 +7929,20 @@ function View:blockRow(def, order)
 		b.hover(row, function()
 			row.BackgroundColor3 = a.c.raised
 			plus.TextTransparency = 0
+			if not favourites[def.id] then starMark.TextTransparency = 0.45 end
 		end, function()
 			row.BackgroundColor3 = a.c.panel
 			plus.TextTransparency = 1
+			if not favourites[def.id] then starMark.TextTransparency = 1 end
 		end)
 
 		b.tip(row, function()
-			return def.doc .. "\n\n" .. sampleCode(def)
+			local parts = { def.doc }
+			if def.side then
+				parts[#parts + 1] = "\nOnly works on the " .. def.side .. "."
+			end
+			parts[#parts + 1] = "\n" .. def.sample
+			return table.concat(parts, "")
 		end)
 
 		-- click to place, drag to carry
@@ -7451,12 +7961,14 @@ function View:blockRow(def, order)
 					if not carried and (now - start).Magnitude > 6 then
 						carried = true
 						b.hideTip()
+						self:remember(def.id)
 						canvas:spawnAndDrag(def.id, now)
 						return
 					end
 					RunService.Heartbeat:Wait()
 				end
 				if not carried then
+					self:remember(def.id)
 					canvas:addBlock(def.id)
 					self.app:setStatus("added " .. def.label)
 				end
@@ -7466,7 +7978,16 @@ function View:blockRow(def, order)
 		return row
 end
 
-function View:categoryHeader(cat, order, open)
+function View:heading(text, order, token)
+		return b.micro(text, {
+			Size = UDim2.new(1, 0, 0, 18),
+			LayoutOrder = order,
+			fg = token or "text3",
+			Parent = self.scroll,
+		})
+end
+
+function View:categoryHeader(cat, order, open, count)
 		local header = b.new("TextButton", {
 			Size = UDim2.new(1, 0, 0, 28),
 			LayoutOrder = order,
@@ -7487,7 +8008,7 @@ function View:categoryHeader(cat, order, open)
 		})
 
 		b.mono({
-			Text = tostring(#c.byCat(cat.id)),
+			Text = tostring(count),
 			Size = UDim2.fromOffset(24, 28),
 			Position = UDim2.new(1, -40, 0, 0),
 			TextSize = 10,
@@ -7511,6 +8032,37 @@ function View:categoryHeader(cat, order, open)
 
 		b.tip(header, cat.blurb)
 		return header
+end
+
+--=============================================================================
+-- state
+--=============================================================================
+
+function View:toggleFavourite(defId)
+		local favourites = {}
+		for key, value in pairs(self.app.settings.favourites or {}) do
+			favourites[key] = value
+		end
+		favourites[defId] = (not favourites[defId]) or nil
+		self.app:setSetting("favourites", favourites)
+		self:refresh()
+end
+
+function View:remember(defId)
+		local recents = {}
+		for _, id in ipairs(self.app.settings.recents or {}) do
+			if id ~= defId then recents[#recents + 1] = id end
+		end
+		table.insert(recents, 1, defId)
+		while #recents > RECENT_LIMIT do
+			recents[#recents] = nil
+		end
+		self.app:setSetting("recents", recents)
+		self:refresh()
+end
+
+function View:focusSearch()
+		self.search:CaptureFocus()
 end
 
 --=============================================================================
@@ -7565,19 +8117,48 @@ function l.mount(app, parent)
 			view.query = view.search.Text
 			view:refresh()
 		end)
-		-- Ctrl+F, a few letters, Enter: the block lands without touching the mouse.
 		view.search.FocusLost:Connect(function(enterPressed)
 			if not enterPressed or not view.topHit then return end
 			if app.canvas then
+				view:remember(view.topHit.id)
 				app.canvas:addBlock(view.topHit.id)
 				app:setStatus("added " .. view.topHit.label)
 			end
 		end)
 
+		-- the side filter ------------------------------------------------------------
+		local filterRow = b.new("Frame", {
+			Size = UDim2.new(1, -20, 0, 20),
+			Position = UDim2.fromOffset(10, 42),
+			Parent = view.frame,
+		})
+		view.filterLabel = b.mono({
+			Text = "",
+			Size = UDim2.new(1, -60, 1, 0),
+			TextSize = 10,
+			fg = "text3",
+			Parent = filterRow,
+		})
+		local filterButton = b.button({
+			label = "all",
+			Size = UDim2.fromOffset(54, 18),
+			Position = UDim2.new(1, -54, 0, 1),
+			Parent = filterRow,
+		})
+		local filterText = filterButton:FindFirstChildWhichIsA("TextLabel")
+		b.tip(filterButton, "Show every block, or only the ones that work in the\n" ..
+			"kind of script this project is heading for.")
+		filterButton.MouseButton1Click:Connect(function()
+			app:setSetting("filterBySide", not app.settings.filterBySide)
+			filterText.Text = app.settings.filterBySide and "fits" or "all"
+			view:refresh()
+		end)
+		filterText.Text = app.settings.filterBySide and "fits" or "all"
+
 		-- list --------------------------------------------------------------------
 		view.scroll = b.new("ScrollingFrame", {
-			Size = UDim2.new(1, -6, 1, -46),
-			Position = UDim2.fromOffset(0, 44),
+			Size = UDim2.new(1, -6, 1, -70),
+			Position = UDim2.fromOffset(0, 68),
 			Parent = view.frame,
 		})
 		view.layout = b.new("UIListLayout", {
@@ -7593,75 +8174,227 @@ function l.mount(app, parent)
 		-- dropping a block back onto the palette throws it away
 		app:on("dragOverPalette", function(over)
 			view.frame.BackgroundColor3 = over and a.c.err:Lerp(a.c.panel, 0.75) or a.c.panel
-			if over then
-				app:setStatus("release to delete")
-			end
+			if over then app:setStatus("release to delete") end
 		end)
 
+		app:on("customs", function() view:refresh() end)
+		app:on("doc", function() view:refreshIfKindChanged() end)
 		a.onChange(function() view:refresh() end)
 		view:refresh()
 		return view
 end
 
-function View:focusSearch()
-		self.search:CaptureFocus()
+-- The side filter depends on the script kind, so the palette follows it.
+function View:refreshIfKindChanged()
+		local kind = self.app:scriptKind()
+		if kind ~= self.lastKind then
+			self.lastKind = kind
+			self:refresh()
+		end
 end
+
+--=============================================================================
+-- drawing
+--=============================================================================
 
 function View:refresh()
 		b.clear(self.scroll)
-		local order = 1
+		local order = 0
+		local function next_() order = order + 1 return order end
 
-		local hits = l.search(self.query)
+		local allowed = function(def) return self:allows(def) end
+		local kind = self.app:scriptKind()
+		self.lastKind = kind
+		self.filterLabel.Text = self.app.settings.filterBySide
+			and ("showing what fits a " .. kind) or "showing every block"
+
+		-- search results, grouped by category ---------------------------------------
+		local hits = l.search(self.query, allowed)
 		self.topHit = hits and hits[1] or nil
 		if hits then
-			b.micro(#hits .. " matching", {
-				Size = UDim2.new(1, 0, 0, 20),
-				LayoutOrder = order,
-				Parent = self.scroll,
-			})
-			order = order + 1
-			for _, def in ipairs(hits) do
-				self:blockRow(def, order).Parent = self.scroll
-				order = order + 1
-			end
 			if #hits == 0 then
 				b.text({
-					Text = "Nothing matches. Try a word from the Luau you want,\nsuch as 'clone' or 'wait'.",
+					Text = "Nothing matches. Try a word from the Luau you want,\nsuch as 'clone' or 'tween'.",
 					Size = UDim2.new(1, 0, 0, 44),
 					TextWrapped = true,
 					fg = "text3",
-					LayoutOrder = order,
+					LayoutOrder = next_(),
 					Parent = self.scroll,
 				})
+				return
+			end
+
+			local byCat, catOrder = {}, {}
+			for _, def in ipairs(hits) do
+				if not byCat[def.cat] then
+					byCat[def.cat] = {}
+					catOrder[#catOrder + 1] = def.cat
+				end
+				table.insert(byCat[def.cat], def)
+			end
+
+			self:heading(#hits .. " matching", next_(), "accent")
+			for _, catId in ipairs(catOrder) do
+				local cat = c.catById[catId]
+				self:heading(cat.name .. "  " .. #byCat[catId], next_())
+				for _, def in ipairs(byCat[catId]) do
+					self:blockRow(def, next_()).Parent = self.scroll
+				end
 			end
 			return
 		end
 
+		-- starred and recent ----------------------------------------------------------
+		local favourites = self.app.settings.favourites or {}
+		local starred = {}
+		for defId in pairs(favourites) do
+			local def = c.get(defId)
+			if def then starred[#starred + 1] = def end
+		end
+		table.sort(starred, function(x, y) return x.label < y.label end)
+		if #starred > 0 then
+			self:heading("starred", next_(), "accent")
+			for _, def in ipairs(starred) do
+				self:blockRow(def, next_()).Parent = self.scroll
+			end
+			b.spacer(8, next_()).Parent = self.scroll
+		end
+
+		local recents = {}
+		for _, defId in ipairs(self.app.settings.recents or {}) do
+			local def = c.get(defId)
+			if def and not favourites[defId] then recents[#recents + 1] = def end
+		end
+		if #recents > 0 then
+			self:heading("recent", next_())
+			for _, def in ipairs(recents) do
+				self:blockRow(def, next_()).Parent = self.scroll
+			end
+			b.spacer(8, next_()).Parent = self.scroll
+		end
+
+		-- categories -------------------------------------------------------------------
 		for _, cat in ipairs(c.cats) do
+			local blocks = {}
+			for _, def in ipairs(c.byCat(cat.id)) do
+				if allowed(def) then blocks[#blocks + 1] = def end
+			end
+
 			local open = self.openCat == cat.id
-			self:categoryHeader(cat, order, open).Parent = self.scroll
-			order = order + 1
+			self:categoryHeader(cat, next_(), open, #blocks).Parent = self.scroll
 
 			if open then
-				b.rule({ LayoutOrder = order, parent = self.scroll, bg = "lineSoft" })
-				order = order + 1
+				b.rule({ LayoutOrder = next_(), parent = self.scroll, bg = "lineSoft" })
 				b.text({
 					Text = cat.blurb,
 					Size = UDim2.new(1, 0, 0, 30),
 					TextWrapped = true,
 					TextSize = 11,
 					fg = "text3",
-					LayoutOrder = order,
+					LayoutOrder = next_(),
 					Parent = self.scroll,
 				})
-				order = order + 1
-				for _, def in ipairs(c.byCat(cat.id)) do
-					self:blockRow(def, order).Parent = self.scroll
-					order = order + 1
+
+				if cat.id == "custom" then
+					self:customControls(next_)
 				end
-				b.spacer(10, order).Parent = self.scroll
-				order = order + 1
+
+				-- subgroups keep a category of seventy readable
+				local groups, byGroup = {}, {}
+				for _, def in ipairs(blocks) do
+					local group = def.group or "General"
+					if not byGroup[group] then
+						byGroup[group] = {}
+						groups[#groups + 1] = group
+					end
+					table.insert(byGroup[group], def)
+				end
+
+				for _, group in ipairs(groups) do
+					if #groups > 1 then
+						self:heading(group, next_())
+					end
+					for _, def in ipairs(byGroup[group]) do
+						self:blockRow(def, next_()).Parent = self.scroll
+					end
+				end
+
+				if #blocks == 0 then
+					b.text({
+						Text = cat.id == "custom"
+							and "You have not made any blocks yet."
+							or "Nothing here fits a " .. kind .. ". Switch the filter to see them.",
+						Size = UDim2.new(1, 0, 0, 30),
+						TextWrapped = true,
+						TextSize = 11,
+						fg = "text3",
+						LayoutOrder = next_(),
+						Parent = self.scroll,
+					})
+				end
+				b.spacer(10, next_()).Parent = self.scroll
 			end
+		end
+end
+
+-- The buttons at the top of your own category.
+function View:customControls(next_)
+		local row = b.new("Frame", {
+			Size = UDim2.new(1, 0, 0, 28),
+			LayoutOrder = next_(),
+			layout = { dir = "x", gap = 6 },
+			Parent = self.scroll,
+		})
+
+		local make = b.button({
+			label = "New block",
+			Size = UDim2.fromOffset(96, 24),
+			LayoutOrder = 1,
+			bg = "accent",
+			labelColor = "accentInk",
+			Parent = row,
+		})
+		b.tip(make, "Write a block of your own, out of Luau with {holes} in it.")
+		make.MouseButton1Click:Connect(function()
+			if self.app.openBlockEditor then self.app.openBlockEditor(nil) end
+		end)
+
+		local fromCanvas = b.button({
+			label = "From selection",
+			Size = UDim2.fromOffset(110, 24),
+			LayoutOrder = 2,
+			Parent = row,
+		})
+		b.tip(fromCanvas, "Turn the selected block, and everything under it,\ninto a block of your own.")
+		fromCanvas.MouseButton1Click:Connect(function()
+			if self.app.makeBlockFromSelection then self.app.makeBlockFromSelection() end
+		end)
+
+		-- one edit row per block you have made
+		for _, custom in ipairs(q.list()) do
+			local editRow = b.new("Frame", {
+				Size = UDim2.new(1, 0, 0, 20),
+				LayoutOrder = next_(),
+				Parent = self.scroll,
+			})
+			b.mono({
+				Text = custom.label,
+				Size = UDim2.new(1, -60, 1, 0),
+				Position = UDim2.fromOffset(12, 0),
+				TextSize = 11,
+				fg = "text3",
+				TextTruncate = Enum.TextTruncate.AtEnd,
+				Parent = editRow,
+			})
+			local edit = b.button({
+				label = "edit",
+				Size = UDim2.fromOffset(46, 18),
+				Position = UDim2.new(1, -48, 0, 1),
+				Parent = editRow,
+			})
+			edit.MouseButton1Click:Connect(function()
+				if self.app.openBlockEditor then self.app.openBlockEditor(custom.id) end
+			end)
 		end
 end
 
@@ -9080,6 +9813,12 @@ function View:contextMenu(block)
 					d.detach(doc, block, centre.X, centre.Y)
 				end)
 			end },
+			{ "Make into a block", "", function()
+				self.app:select(block.id)
+				if self.app.makeBlockFromSelection then
+					self.app.makeBlockFromSelection()
+				end
+			end },
 			{ "Delete", "Del", function() self:deleteSelected() end },
 		}
 
@@ -9150,6 +9889,7 @@ local e = require(script.Parent.e)
 local f = require(script.Parent.f)
 local h = require(script.Parent.h)
 local o = require(script.Parent.o)
+local q = require(script.Parent.q)
 
 local ChangeHistoryService = game:GetService("ChangeHistoryService")
 local Selection = game:GetService("Selection")
@@ -10243,8 +10983,130 @@ function n.settingsView(app, parent)
 			end)
 		end
 
+		-- your own blocks ---------------------------------------------------------
+		-- Plugin settings live in one Studio install, so a library that is worth
+		-- keeping wants to be a ModuleScript: committed, dragged into a model, or
+		-- handed over in a place file.
+		local mine = section(column, 5, "your blocks")
+		local mineNote = b.text({
+			Text = "",
+			Size = UDim2.new(1, 0, 0, 30),
+			TextWrapped = true,
+			TextSize = 11,
+			fg = "text3",
+			LayoutOrder = 2,
+			Parent = mine,
+		})
+
+		local mineButtons = b.new("Frame", {
+			Size = UDim2.new(1, 0, 0, 26),
+			LayoutOrder = 3,
+			layout = { dir = "x", gap = 6 },
+			Parent = mine,
+		})
+
+		local function paintMine()
+			local count = #q.list()
+			mineNote.Text = count == 0
+				and ("You have not made any blocks yet. The palette has a \"your " ..
+					"blocks\" section at the bottom with a New block button, and " ..
+					"right-clicking anything on the canvas offers Make into a block.")
+				or (count .. (count == 1 and " block" or " blocks") ..
+					" of your own. Saving writes them into a ModuleScript you can " ..
+					"commit or share; loading reads one back.")
+		end
+		app:on("customs", paintMine)
+		app:on("doc", paintMine)
+		paintMine()
+
+		local newBlock = b.button({
+			label = "New block",
+			Size = UDim2.fromOffset(104, 26),
+			LayoutOrder = 1,
+			Parent = mineButtons,
+		})
+		newBlock.MouseButton1Click:Connect(function()
+			if app.openBlockEditor then app.openBlockEditor(nil) end
+		end)
+
+		local saveLibrary = b.button({
+			label = "Save to a ModuleScript",
+			Size = UDim2.fromOffset(172, 26),
+			LayoutOrder = 2,
+			Parent = mineButtons,
+		})
+		b.tip(saveLibrary, "Writes every block you have made into one ModuleScript.")
+		saveLibrary.MouseButton1Click:Connect(function()
+			local list = q.list()
+			if #list == 0 then
+				app:setStatus("no blocks of your own to save yet")
+				return
+			end
+			local source = q.toModuleSource(list, app.doc.name)
+			local recording = ChangeHistoryService:TryBeginRecording("ABlocks block library")
+			local ok, err = pcall(function()
+				local parentPath = app:destinationFor("ModuleScript")
+				local parent = o.resolvePath(parentPath)
+				if not parent then error("could not find " .. parentPath, 0) end
+				local made = Instance.new("ModuleScript")
+				made.Name = "ABlocksBlocks"
+				made.Source = source
+				made.Parent = parent
+				Selection:Set({ made })
+				return made
+			end)
+			if recording then
+				ChangeHistoryService:FinishRecording(recording,
+					ok and Enum.FinishRecordingOperation.Commit
+					or Enum.FinishRecordingOperation.Cancel)
+			end
+			if ok then
+				app:setStatus(string.format("saved %d blocks into ABlocksBlocks in %s",
+					#list, app:destinationFor("ModuleScript")))
+			else
+				n.textModal("could not save the library", tostring(err),
+					"Studio asks permission before a plugin may write script source.")
+			end
+		end)
+
+		local loadLibrary = b.button({
+			label = "Load from a ModuleScript",
+			Size = UDim2.fromOffset(186, 26),
+			LayoutOrder = 3,
+			Parent = mineButtons,
+		})
+		b.tip(loadLibrary, "Select a saved library in the Explorer first.\n" ..
+			"Loaded blocks are added, never overwritten.")
+		loadLibrary.MouseButton1Click:Connect(function()
+			local instance = Selection:Get()[1]
+			if not instance or not instance:IsA("ModuleScript") then
+				app:setStatus("select the ModuleScript in the Explorer first")
+				return
+			end
+			local source, readErr = readSource(instance)
+			if not source then
+				app:setStatus(readErr or "could not read that script")
+				return
+			end
+			local made, err = q.fromModuleSource(source)
+			if not made then
+				-- Not a saved library, then. A module of ordinary functions is
+				-- still useful: offer one block for each function it exports.
+				if app.makeBlocksFromModule and app.makeBlocksFromModule(instance) then
+					return
+				end
+				app:setStatus(tostring(err))
+				return
+			end
+			local added = 0
+			for _, custom in ipairs(made) do
+				if app:putCustom(custom) then added += 1 end
+			end
+			app:setStatus(string.format("added %d blocks from %s", added, instance.Name))
+		end)
+
 		-- shortcuts ---------------------------------------------------------------------
-		local keys = section(column, 5, "keyboard")
+		local keys = section(column, 6, "keyboard")
 		local list = {
 			{ "Ctrl+Z / Ctrl+Y", "undo, redo" },
 			{ "Delete", "remove the selected block and what follows it" },
@@ -10301,11 +11163,13 @@ return n
 
 local d = require(script.Parent.d)
 local c = require(script.Parent.c)
+local q = require(script.Parent.q)
 
 local HttpService = game:GetService("HttpService")
 
 local o = {}
 
+local KEY_CUSTOMS = "ablocks.customs.v1"
 local KEY_PROJECTS = "ablocks.projects.v1"
 local KEY_SETTINGS = "ablocks.settings.v1"
 local KEY_CURRENT = "ablocks.current.v1"
@@ -10334,6 +11198,9 @@ local DEFAULT_SETTINGS = {
 		showCode = true,
 		banner = true,
 		read = {},
+		favourites = {},
+		recents = {},
+		filterBySide = false,
 }
 
 local App = {}
@@ -10457,9 +11324,12 @@ function o.newApp(plugin, widget)
 		end
 		project = project or app.projects[1]
 
+		app:loadCustoms()
+
 		if project then
 			local restored = d.fromSave(project.doc)
 			app.doc = restored or starterDoc()
+			if app.doc.customs then q.adopt(app.doc.customs) end
 			app.projectId = project.id
 		else
 			app.doc = starterDoc()
@@ -10474,7 +11344,48 @@ end
 --=============================================================================
 
 local function snapshot(app)
+		app.doc.customs = q.embed(app.doc)
 		return d.toSave(app.doc)
+end
+
+--=============================================================================
+-- the custom block library
+--=============================================================================
+
+function App:loadCustoms()
+		local saved = readJson(self.plugin, KEY_CUSTOMS, nil)
+		if type(saved) ~= "table" then return 0 end
+		return q.adopt(saved)
+end
+
+function App:saveCustoms()
+		local out = {}
+		for _, custom in ipairs(q.list()) do
+			if custom.shared ~= false then out[#out + 1] = q.toSave(custom) end
+		end
+		writeJson(self.plugin, KEY_CUSTOMS, out)
+		self:emit("customs")
+end
+
+-- Adds or replaces one of your own blocks and tells everything to redraw.
+function App:putCustom(custom)
+		local ok, err = q.register(custom)
+		if not ok then
+			self:setStatus("that block would not build: " .. tostring(err))
+			return false, err
+		end
+		self:saveCustoms()
+		self:emit("doc")
+		self:setStatus("saved the block " .. custom.label)
+		return true
+end
+
+function App:dropCustom(id)
+		local custom = q.get(id)
+		q.unregister(id)
+		self:saveCustoms()
+		self:emit("doc")
+		if custom then self:setStatus("deleted the block " .. custom.label) end
 end
 
 -- Runs `edit`, having first stored a snapshot for undo.  Returns whatever the
@@ -10578,6 +11489,7 @@ end
 --=============================================================================
 
 function App:setDoc(doc, label)
+		if doc.customs then q.adopt(doc.customs) end
 		self.undoStack[#self.undoStack + 1] = { label = label or "replace", save = snapshot(self) }
 		if #self.undoStack > HISTORY_LIMIT then table.remove(self.undoStack, 1) end
 		self.redoStack = {}
@@ -10656,6 +11568,7 @@ function App:openProject(id)
 		for _, project in ipairs(self.projects) do
 			if project.id == id then
 				local restored = d.fromSave(project.doc)
+				if restored and restored.customs then q.adopt(restored.customs) end
 				if not restored then
 					self:setStatus("could not open " .. tostring(project.name))
 					return false
@@ -10753,6 +11666,30 @@ function o.resolvePath(path)
 			end
 		end
 		return target ~= game and target or nil
+end
+
+-- The other direction: what a generated script should write to reach this
+-- instance.  `GetFullName` starts at `game`, which is not spelt that way in
+-- code, so the first step becomes a GetService call.
+function o.pathTo(instance)
+		if not instance then return nil end
+		local pieces = {}
+		local at = instance
+		while at and at ~= game do
+			table.insert(pieces, 1, at.Name)
+			at = at.Parent
+		end
+		if #pieces == 0 then return nil end
+		local service = table.remove(pieces, 1)
+		local path = string.format("game:GetService(%q)", service)
+		for _, piece in ipairs(pieces) do
+			if string.match(piece, "^[%a_][%w_]*$") then
+				path ..= "." .. piece
+			else
+				path ..= string.format("[%q]", piece)
+			end
+		end
+		return path
 end
 
 -- Remembers which script in the place this project was read out of, so the
@@ -10864,6 +11801,8 @@ local l = require(script.Parent.l)
 local m = require(script.Parent.m)
 local n = require(script.Parent.n)
 local o = require(script.Parent.o)
+local q = require(script.Parent.q)
+local r = require(script.Parent.r)
 
 local UserInputService = game:GetService("UserInputService")
 
@@ -10871,7 +11810,7 @@ local p = {}
 
 local TABS = {
 		{ id = "build", label = "build", hint = "The canvas, the palette and the generated Luau." },
-		{ id = "learn", label = "learn", hint = "Twenty-six lessons, from first block to first script." },
+		{ id = "learn", label = "learn", hint = "Thirty-two lessons, from first block to first script." },
 		{ id = "import", label = "import", hint = "Turn a script you have selected into blocks." },
 		{ id = "setup", label = "setup", hint = "Projects, where scripts go, theme, shortcuts." },
 }
@@ -11323,13 +12262,28 @@ function p.mount(app, widget)
 			Parent = pages,
 		})
 
-		shell.palette = l.mount(app, buildPage)
+		-- While a custom block is open as a canvas a strip sits above everything
+		-- saying so; the rest of the page slides down to make room for it.
+		local editBanner = r.banner(app, buildPage)
+
+		local buildBody = b.new("Frame", {
+			Name = "Body",
+			Size = UDim2.fromScale(1, 1),
+			Parent = buildPage,
+		})
+		app:on("editingCustom", function()
+			local shown = editBanner.Visible
+			buildBody.Position = shown and UDim2.fromOffset(0, 30) or UDim2.fromOffset(0, 0)
+			buildBody.Size = shown and UDim2.new(1, 0, 1, -30) or UDim2.fromScale(1, 1)
+		end)
+
+		shell.palette = l.mount(app, buildBody)
 
 		local middle = b.new("Frame", {
 			Name = "Middle",
 			Size = UDim2.new(1, -236, 1, 0),
 			Position = UDim2.fromOffset(236, 0),
-			Parent = buildPage,
+			Parent = buildBody,
 		})
 
 		local canvasHolder = b.new("Frame", {
@@ -11374,6 +12328,54 @@ function p.mount(app, widget)
 				and UDim2.new(1, -418, 0, 8) or UDim2.new(1, -26, 0, 8)
 			foldMark.Rotation = app.settings.showCode and -90 or 90
 		end)
+
+		-- your own blocks ------------------------------------------------------------
+		-- The palette and the canvas menu both reach the editor through the app, so
+		-- neither of them has to know that r exists.
+		app.openBlockEditor = function(customId, seed)
+			r.open(app, customId, seed)
+		end
+
+		app.makeBlockFromSelection = function()
+			local block = app:selected()
+			if not block then
+				app:setStatus("select a block on the canvas first, then try again")
+				shell.showTab("build")
+				return
+			end
+			local custom
+			if block.k == "def" then
+				-- a define block becomes a block that *calls* the function, which is
+				-- almost always what someone means by "make this into a block"
+				custom = q.fromFunctionBlock(app.doc, block)
+			end
+			custom = custom or q.fromBlocks(app.doc, block)
+			shell.showTab("build")
+			r.open(app, nil, custom)
+		end
+		-- One block per function a ModuleScript exports.  Returns whether it found
+		-- anything, so the caller can fall back to its own message.
+		app.makeBlocksFromModule = function(instance)
+			local path = o.pathTo(instance)
+			if not path then
+				app:setStatus("that module is not in the game tree")
+				return false
+			end
+			local made = q.fromModule(instance, path)
+			if not made then return false end
+			if #made == 1 then
+				-- one function is worth looking at before it is saved
+				r.open(app, nil, made[1])
+				return true
+			end
+			local added = 0
+			for _, custom in ipairs(made) do
+				if app:putCustom(custom) then added = added + 1 end
+			end
+			app:setStatus(string.format("made %d blocks from the functions in %s",
+				added, instance.Name))
+			return true
+		end
 
 		-- other tabs -------------------------------------------------------------------
 		shell.learn = k.mount(app, pages)
@@ -11434,6 +12436,1301 @@ return p
 			</Properties>
 		</Item>
 	<Item class="ModuleScript" referent="RBX17">
+			<Properties>
+				<string name="Name">q</string>
+				<ProtectedString name="Source"><![CDATA[--!nonstrict
+-- q  ·  custom blocks
+--
+-- A custom block is stored as Luau with placeholders:
+--
+--     {player}.leaderstats.Coins.Value += {amount}
+--
+-- A placeholder written inline is an input field.  A placeholder alone on its
+-- own line is a slot you can drop blocks into:
+--
+--     if {player}.Team == teamA then
+--         {body}
+--     end
+--
+-- Everything reduces to that one shape, which is what lets all four ways of
+-- making a block -- from the canvas, from typed Luau, from a function block,
+-- from a ModuleScript -- share a single code path, and lets the same block be
+-- edited as text or reopened as a canvas.
+--
+-- How it compiles is decided here rather than by the author: a block with no
+-- slots becomes one `local function` at the top and a call at each use, the
+-- way you would factor it by hand.  A block with slots has to be inlined,
+-- because what goes inside changes from use to use.
+
+local c = require(script.Parent.c)
+local d = require(script.Parent.d)
+local e = require(script.Parent.e)
+local g = require(script.Parent.g)
+local h = require(script.Parent.h)
+
+local q = {}
+
+q.FORMAT = 1
+
+-- every custom block currently registered, by id
+q.all = {}
+
+--=============================================================================
+-- helpers
+--=============================================================================
+
+local function trim(text)
+		return (string.gsub(text, "^%s*(.-)%s*$", "%1"))
+end
+
+local function lines(text)
+		local out = {}
+		for line in string.gmatch(text .. "\n", "([^\n]*)\n") do
+			out[#out + 1] = line
+		end
+		while #out > 0 and trim(out[#out]) == "" do
+			out[#out] = nil
+		end
+		return out
+end
+
+-- "Give a coin" -> "giveACoin", always a legal identifier
+function q.functionName(label, taken)
+		local pieces = {}
+		for word in string.gmatch(label, "[%a%d]+") do
+			pieces[#pieces + 1] = word
+		end
+		if #pieces == 0 then pieces = { "block" } end
+		local name = string.lower(string.sub(pieces[1], 1, 1)) .. string.sub(pieces[1], 2)
+		for index = 2, #pieces do
+			name = name .. string.upper(string.sub(pieces[index], 1, 1)) ..
+				string.sub(pieces[index], 2)
+		end
+		if string.match(name, "^%d") then name = "block" .. name end
+
+		if taken then
+			local base, suffix = name, 2
+			while taken[name] do
+				name = base .. suffix
+				suffix = suffix + 1
+			end
+		end
+		return name
+end
+
+-- Reads the placeholders out of the Luau: inline ones are fields, ones alone on
+-- a line are slots.
+function q.readShape(luau)
+		local fields, slots = {}, {}
+		local seenField, seenSlot = {}, {}
+
+		for _, line in ipairs(lines(luau)) do
+			local bare = string.match(trim(line), "^{([%a_][%w_]*)}$")
+			if bare then
+				if not seenSlot[bare] then
+					seenSlot[bare] = true
+					slots[#slots + 1] = bare
+				end
+			else
+				for key in string.gmatch(line, "{([%a_][%w_]*)}") do
+					if not seenField[key] then
+						seenField[key] = true
+						fields[#fields + 1] = key
+					end
+				end
+			end
+		end
+
+		return fields, slots
+end
+
+--=============================================================================
+-- making one
+--=============================================================================
+
+local nextId = 1
+
+local function freshId()
+		local id = "cb" .. nextId .. "_" .. (math.floor(os.clock() * 1000) % 100000)
+		nextId = nextId + 1
+		return id
+end
+
+-- The blank a new custom block starts from.
+function q.new(label, luau)
+		label = label or "My block"
+		luau = luau or "-- what this block should do"
+		local fieldKeys, slotKeys = q.readShape(luau)
+
+		local fields = {}
+		for _, key in ipairs(fieldKeys) do
+			fields[#fields + 1] = { key = key, kind = "expr", default = "", label = key }
+		end
+		local slots = {}
+		for _, key in ipairs(slotKeys) do
+			slots[#slots + 1] = { key = key, label = key }
+		end
+
+		return {
+			id = freshId(),
+			label = label,
+			group = "Mine",
+			colour = "vars",
+			doc = "",
+			wording = nil,       -- nil means build one from the label and fields
+			luau = luau,
+			fields = fields,
+			slots = slots,
+			returns = false,
+			shared = true,
+		}
+end
+
+-- Wording defaults to the label followed by each field, which reads acceptably
+-- and can be replaced with anything using the same placeholders.
+function q.wordingOf(custom)
+		if custom.wording and trim(custom.wording) ~= "" then return custom.wording end
+		local parts = { custom.label }
+		for _, field in ipairs(custom.fields) do
+			parts[#parts + 1] = "{" .. field.key .. "}"
+		end
+		return table.concat(parts, " ")
+end
+
+-- Keeps fields and slots in step with the Luau after it has been edited.
+function q.refresh(custom)
+		local fieldKeys, slotKeys = q.readShape(custom.luau)
+
+		local existing = {}
+		for _, field in ipairs(custom.fields) do existing[field.key] = field end
+		local fields = {}
+		for _, key in ipairs(fieldKeys) do
+			fields[#fields + 1] = existing[key]
+				or { key = key, kind = "expr", default = "", label = key }
+		end
+		custom.fields = fields
+
+		local hadSlot = {}
+		for _, slot in ipairs(custom.slots) do hadSlot[slot.key] = slot end
+		local slots = {}
+		for _, key in ipairs(slotKeys) do
+			slots[#slots + 1] = hadSlot[key] or { key = key, label = key }
+		end
+		custom.slots = slots
+		return custom
+end
+
+--=============================================================================
+-- compiling into a real block
+--=============================================================================
+
+local OUT_FIELD = "out"
+
+-- Splits the Luau around its slot markers into head lines, the lead-in lines
+-- for each slot, and tail lines -- the shape the registry wants.
+local function split(custom)
+		local head, slots = {}, {}
+		local collected = {}
+		local seenMarker = false
+
+		for _, line in ipairs(lines(custom.luau)) do
+			local bare = string.match(trim(line), "^{([%a_][%w_]*)}$")
+			if bare then
+				-- whatever was gathered since the last marker leads into this one
+				slots[#slots + 1] = { key = bare, pre = seenMarker and collected or nil }
+				collected = {}
+				seenMarker = true
+			elseif seenMarker then
+				collected[#collected + 1] = line
+			else
+				head[#head + 1] = line
+			end
+		end
+
+		return { head = head, slots = slots, tail = collected }
+end
+
+-- A block with no slots compiles to a function; one with slots must inline.
+function q.isHelper(custom)
+		return #custom.slots == 0
+end
+
+-- Turns a custom block into a registry definition.
+function q.compile(custom)
+		local parts = split(custom)
+		local wording = q.wordingOf(custom)
+
+		local fields = {}
+		for _, field in ipairs(custom.fields) do
+			fields[field.key] = {
+				key = field.key,
+				kind = field.kind or "expr",
+				default = field.default or "",
+				placeholder = field.label or field.key,
+				options = field.options,
+			}
+		end
+
+		local head, code, tail, codeTail
+		local slots = {}
+
+		if custom.returns then
+			-- a value-producing block reads as "make x = ..." and assigns
+			fields[OUT_FIELD] = { key = OUT_FIELD, kind = "name", default = "value",
+				placeholder = "name" }
+			head = "make {" .. OUT_FIELD .. "} = " .. wording
+			code = "local {" .. OUT_FIELD .. "} = " .. trim(table.concat(parts.head, " "))
+		else
+			head = wording
+			code = parts.head
+			if #code == 0 then code = { "-- " .. custom.label } end
+			if #parts.slots > 0 then
+				for index, slot in ipairs(parts.slots) do
+					slots[index] = {
+						key = slot.key,
+						label = slot.label or slot.key,
+						codePreLines = index > 1 and slot.pre or nil,
+					}
+				end
+				tail = "end"
+				codeTail = parts.tail
+				if #codeTail == 0 then codeTail = nil end
+			end
+		end
+
+		local def = c.define{
+			id = "custom_" .. custom.id,
+			cat = "custom",
+			group = custom.group or "Mine",
+			label = custom.label,
+			head = head,
+			code = code,
+			tail = tail,
+			codeTail = codeTail,
+			fields = fields,
+			slots = slots,
+			doc = (custom.doc and trim(custom.doc) ~= "" and custom.doc)
+				or ("One of your own blocks. It writes the Luau you gave it, with " ..
+					"whatever you type in its fields."),
+			tags = "custom mine " .. string.lower(custom.label),
+		}
+
+		-- What the code writer needs, without it having to know about this module.
+		local params = {}
+		for _, field in ipairs(custom.fields) do
+			params[#params + 1] = field.key
+		end
+		def.custom = {
+			cid = custom.id,
+			helper = q.isHelper(custom) and not custom.returns,
+			returnsHelper = q.isHelper(custom) and custom.returns,
+			fn = custom.fn,
+			params = params,
+			body = parts.head,
+			returns = custom.returns,
+			out = OUT_FIELD,
+		}
+		return def
+end
+
+--=============================================================================
+-- the library
+--=============================================================================
+
+local function reserveNames()
+		local taken = {}
+		for _, custom in pairs(q.all) do
+			if custom.fn then taken[custom.fn] = true end
+		end
+		return taken
+end
+
+function q.register(custom)
+		q.unregister(custom.id)
+		custom.fn = custom.fn or q.functionName(custom.label, reserveNames())
+		q.all[custom.id] = custom
+		local ok, err = pcall(q.compile, custom)
+		if not ok then
+			q.all[custom.id] = nil
+			return nil, tostring(err)
+		end
+		return custom
+end
+
+function q.unregister(id)
+		if not id then return end
+		q.all[id] = nil
+		c.undefine("custom_" .. id)
+end
+
+function q.get(id)
+		return q.all[id]
+end
+
+function q.list()
+		local out = {}
+		for _, custom in pairs(q.all) do
+			out[#out + 1] = custom
+		end
+		table.sort(out, function(a, b)
+			if a.group ~= b.group then return a.group < b.group end
+			return a.label < b.label
+		end)
+		return out
+end
+
+function q.groups()
+		local seen, out = {}, {}
+		for _, custom in pairs(q.all) do
+			local group = custom.group or "Mine"
+			if not seen[group] then
+				seen[group] = true
+				out[#out + 1] = group
+			end
+		end
+		table.sort(out)
+		return out
+end
+
+-- Plain tables in, plain tables out, so the whole library fits in one setting.
+function q.toSave(custom)
+		return {
+			id = custom.id, label = custom.label, group = custom.group,
+			colour = custom.colour, doc = custom.doc, wording = custom.wording,
+			luau = custom.luau, returns = custom.returns, fn = custom.fn,
+			shared = custom.shared, fields = custom.fields, slots = custom.slots,
+		}
+end
+
+function q.fromSave(saved)
+		if type(saved) ~= "table" or type(saved.luau) ~= "string" then return nil end
+		local custom = {
+			id = saved.id or freshId(),
+			label = saved.label or "My block",
+			group = saved.group or "Mine",
+			colour = saved.colour or "vars",
+			doc = saved.doc or "",
+			wording = saved.wording,
+			luau = saved.luau,
+			returns = saved.returns == true,
+			fn = saved.fn,
+			shared = saved.shared ~= false,
+			fields = saved.fields or {},
+			slots = saved.slots or {},
+		}
+		return q.refresh(custom)
+end
+
+--=============================================================================
+-- the four ways of making one
+--=============================================================================
+
+-- 1. from typed Luau
+function q.fromLuau(label, luau)
+		return q.new(label, luau)
+end
+
+-- 2. from a stack of blocks on the canvas: the block and everything under it
+function q.fromBlocks(doc, block)
+		local pieces = {}
+		local list = d.listOf(doc, block)
+		local reached = false
+		for _, id in ipairs(list or {}) do
+			if id == block.id then reached = true end
+			if reached then
+				local sibling = doc.blocks[id]
+				if sibling then pieces[#pieces + 1] = e.snippet(doc, sibling) end
+			end
+		end
+		if #pieces == 0 then pieces[1] = e.snippet(doc, block) end
+
+		local custom = q.new("My block", table.concat(pieces, "\n"))
+		custom.doc = "Built from blocks on the canvas."
+		return custom
+end
+
+-- 3. from a `define` block already in the project
+function q.fromFunctionBlock(doc, block)
+		local def = c.get(block.k)
+		if not def then return nil, "that is not a block" end
+		local name = c.fieldValue(def, block, "name")
+		local params = c.fieldValue(def, block, "params")
+
+		local holes = {}
+		for word in string.gmatch(params, "[%a_][%w_]*") do
+			holes[#holes + 1] = "{" .. word .. "}"
+		end
+		local call = name .. "(" .. table.concat(holes, ", ") .. ")"
+		local custom = q.new(name, call)
+		custom.doc = "Runs the `" .. name .. "` function defined in this project."
+		return custom
+end
+
+-- 4. from a ModuleScript in the place: one block per function it defines
+function q.fromModule(instance, path)
+		local ok, source = pcall(function() return instance.Source end)
+		if not ok or not source then
+			return nil, "Studio would not let the plugin read that script"
+		end
+		local chunk, err = g.parse(source)
+		if not chunk then
+			return nil, string.format("line %d: %s", err.line, err.msg)
+		end
+
+		local made = {}
+		for _, statement in ipairs(chunk.body) do
+			if statement.k == "func" and not statement.isMethod then
+				local owner, name = string.match(statement.name, "^([%a_][%w_]*)%.([%a_][%w_]*)$")
+				if owner and name then
+					local holes = {}
+					for _, param in ipairs(statement.fn.params) do
+						if not param.vararg then
+							holes[#holes + 1] = "{" .. param.name .. "}"
+						end
+					end
+					local call = string.format("require(%s).%s(%s)", path, name,
+						table.concat(holes, ", "))
+					local custom = q.new(name, call)
+					custom.group = instance.Name
+					custom.doc = "Calls `" .. name .. "` from the " .. instance.Name ..
+						" module."
+					made[#made + 1] = custom
+				end
+			end
+		end
+
+		if #made == 0 then
+			return nil, "no module functions found in " .. instance.Name
+		end
+		return made
+end
+
+--=============================================================================
+-- editing one as a canvas
+--=============================================================================
+
+-- Turns the stored Luau into blocks, with the placeholders standing in as
+-- ordinary names so they survive the round trip.
+function q.toCanvas(custom)
+		local readable = string.gsub(custom.luau, "{([%a_][%w_]*)}", "__%1")
+		local doc, report, err = h.fromCode(readable, custom.label)
+		if not doc then return nil, err end
+		doc.customEdit = custom.id
+		return doc, report
+end
+
+-- And back again after editing.
+function q.fromCanvas(custom, doc)
+		local code = e.generate(doc, { header = false })
+		custom.luau = (string.gsub(code, "__([%a_][%w_]*)", "{%1}"))
+		return q.refresh(custom)
+end
+
+--=============================================================================
+-- the library as a ModuleScript
+--
+-- Sharing a library by hand is the one thing plugin settings cannot do: they
+-- live in one person's Studio.  A ModuleScript can be committed, dragged into
+-- a model, or handed to someone in a place file, so that is what the library
+-- saves to.  It is written as a plain Luau table and read back with the same
+-- parser the importer uses -- no loadstring, no JSON blob, and you can edit
+-- the file by hand without breaking it.
+--=============================================================================
+
+local function quote(text)
+		return (string.format("%q", tostring(text)):gsub("\\\n", "\\n"))
+end
+
+-- Long-bracket form for the code itself, choosing a level of `=` no closing
+-- bracket in the body can collide with.
+local function longString(text)
+		local level = 0
+		while string.find(text, "]" .. string.rep("=", level) .. "]", 1, true)
+			or string.find(text, "[" .. string.rep("=", level) .. "[", 1, true) do
+			level += 1
+		end
+		local pad = string.rep("=", level)
+		return "[" .. pad .. "[\n" .. text .. "\n]" .. pad .. "]"
+end
+
+local function writeEntry(custom, indent)
+		local out = {}
+		local pad = string.rep("\t", indent)
+		local inner = string.rep("\t", indent + 1)
+		out[#out + 1] = pad .. "{"
+		out[#out + 1] = inner .. "label = " .. quote(custom.label) .. ","
+		out[#out + 1] = inner .. "group = " .. quote(custom.group or "Mine") .. ","
+		if custom.doc and trim(custom.doc) ~= "" then
+			out[#out + 1] = inner .. "doc = " .. quote(custom.doc) .. ","
+		end
+		if custom.wording and trim(custom.wording) ~= "" then
+			out[#out + 1] = inner .. "wording = " .. quote(custom.wording) .. ","
+		end
+		if custom.returns then out[#out + 1] = inner .. "returns = true," end
+		out[#out + 1] = inner .. "luau = " ..
+			longString((string.gsub(custom.luau, "%s+$", ""))) .. ","
+
+		if #custom.fields > 0 then
+			out[#out + 1] = inner .. "fields = {"
+			for _, field in ipairs(custom.fields) do
+				local parts = {
+					"key = " .. quote(field.key),
+					"kind = " .. quote(field.kind or "expr"),
+					"default = " .. quote(field.default or ""),
+					"label = " .. quote(field.label or field.key),
+				}
+				if field.options then
+					parts[#parts + 1] = "options = " .. quote(field.options)
+				end
+				out[#out + 1] = inner .. "\t{ " .. table.concat(parts, ", ") .. " },"
+			end
+			out[#out + 1] = inner .. "},"
+		end
+
+		if #custom.slots > 0 then
+			out[#out + 1] = inner .. "slots = {"
+			for _, slot in ipairs(custom.slots) do
+				out[#out + 1] = inner .. "\t{ key = " .. quote(slot.key) ..
+					", label = " .. quote(slot.label or slot.key) .. " },"
+			end
+			out[#out + 1] = inner .. "},"
+		end
+
+		out[#out + 1] = pad .. "},"
+		return table.concat(out, "\n")
+end
+
+-- `list` defaults to the whole library.
+function q.toModuleSource(list, projectName)
+		list = list or q.list()
+		local out = {
+			"-- Blocks made in ABlocks.",
+			"--",
+			"-- Every entry below is one block: `luau` is what it writes, and each",
+			"-- {placeholder} in it becomes a field you fill in on the block.  Edit",
+			"-- this file by hand if you like -- ABlocks reads it back the same way.",
+			"--",
+			"-- To use these: open ABlocks, go to setup, select this ModuleScript in",
+			"-- the Explorer and press \"Load from a ModuleScript\".",
+		}
+		if projectName then
+			out[#out + 1] = "-- Saved from the project " .. projectName .. "."
+		end
+		out[#out + 1] = ""
+		out[#out + 1] = "return {"
+		for _, custom in ipairs(list) do
+			out[#out + 1] = writeEntry(custom, 1)
+		end
+		out[#out + 1] = "}"
+		out[#out + 1] = ""
+		return table.concat(out, "\n")
+end
+
+-- The lexer keeps strings as written, delimiters and all, because everything
+-- else in the plugin copies source text around rather than reading it.  Here
+-- the actual text is wanted, so this is the one place that decodes one.
+local ESCAPES = {
+		n = "\n", t = "\t", r = "\r", a = "\a", b = "\b", f = "\f", v = "\v",
+		["\\"] = "\\", ["\""] = "\"", ["'"] = "'", ["\n"] = "\n",
+}
+
+local function decodeString(raw)
+		if type(raw) ~= "string" then return nil end
+
+		local pad = string.match(raw, "^%[(=*)%[")
+		if pad then
+			local body = string.sub(raw, #pad + 3, -(#pad + 3))
+			-- Luau drops a newline that comes straight after the opening bracket
+			return (string.gsub(body, "^\n", ""))
+		end
+
+		local quoteChar = string.sub(raw, 1, 1)
+		if quoteChar ~= "\"" and quoteChar ~= "'" then return nil end
+
+		local body = string.sub(raw, 2, -2)
+		local out, i = {}, 1
+		while i <= #body do
+			local ch = string.sub(body, i, i)
+			if ch == "\\" then
+				local nextCh = string.sub(body, i + 1, i + 1)
+				local digits = string.match(body, "^%d%d?%d?", i + 1)
+				local hex = string.match(body, "^x(%x%x)", i + 1)
+				if hex then
+					out[#out + 1] = string.char(tonumber(hex, 16))
+					i += 4
+				elseif digits then
+					out[#out + 1] = string.char(tonumber(digits))
+					i += 1 + #digits
+				elseif nextCh == "z" then
+					-- \z eats the whitespace that follows it
+					local _, stop = string.find(body, "^%s*", i + 2)
+					i = (stop or i + 1) + 1
+				else
+					out[#out + 1] = ESCAPES[nextCh] or nextCh
+					i += 2
+				end
+			else
+				out[#out + 1] = ch
+				i += 1
+			end
+		end
+		return table.concat(out)
+end
+
+-- Reads a constant expression out of the parsed module: strings, numbers,
+-- booleans and tables of them.  Anything cleverer is refused rather than
+-- guessed at, because a library file should not be able to run code.
+local function constant(node)
+		if not node then return nil end
+		if node.k == "str" then return decodeString(node.value) end
+		if node.k == "num" then return tonumber(node.value) end
+		if node.k == "bool" then return node.value end
+		if node.k == "nil" then return nil end
+		if node.k == "table" then
+			local out = {}
+			for _, field in ipairs(node.fields) do
+				if field.kind == "array" then
+					out[#out + 1] = constant(field.value)
+				elseif field.kind == "named" then
+					out[field.name] = constant(field.value)
+				elseif field.kind == "index" then
+					local key = constant(field.key)
+					if type(key) == "string" or type(key) == "number" then
+						out[key] = constant(field.value)
+					end
+				end
+			end
+			return out
+		end
+		return nil, "only plain values belong in a block library"
+end
+
+function q.fromModuleSource(source)
+		local chunk, err = g.parse(source)
+		if not chunk then
+			return nil, string.format("line %d: %s", err.line, err.msg)
+		end
+
+		local returned
+		for _, statement in ipairs(chunk.body) do
+			if statement.k == "return" then returned = statement.exprs[1] end
+		end
+		if not returned then
+			return nil, "that module does not return anything"
+		end
+
+		local value = constant(returned)
+		if type(value) ~= "table" then
+			return nil, "that module does not return a list of blocks"
+		end
+
+		local made, skipped = {}, 0
+		for _, entry in ipairs(value) do
+			if type(entry) == "table" and type(entry.luau) == "string" then
+				entry.luau = (string.gsub(entry.luau, "%s+$", ""))
+			end
+			local custom = type(entry) == "table" and type(entry.luau) == "string"
+				and q.fromSave(entry) or nil
+			if custom then
+				-- names and ids are earned on the way in, so loading someone
+				-- else's library never collides with a block you already have
+				custom.id = freshId()
+				custom.fn = nil
+				made[#made + 1] = custom
+			else
+				skipped += 1
+			end
+		end
+
+		if #made == 0 then
+			return nil, "no blocks in that module"
+		end
+		return made, skipped
+end
+
+--=============================================================================
+-- which ones a document uses
+--=============================================================================
+
+function q.usedIn(doc)
+		local used = {}
+		d.walk(doc, function(block)
+			local def = c.get(block.k)
+			if def and def.custom then
+				local custom = q.all[def.custom.cid]
+				if custom then used[custom.id] = custom end
+			end
+		end)
+		local out = {}
+		for _, custom in pairs(used) do out[#out + 1] = custom end
+		table.sort(out, function(a, b) return a.id < b.id end)
+		return out
+end
+
+-- Projects carry a copy of every custom block they use, so opening someone
+-- else's project adds their blocks rather than breaking.
+function q.embed(doc)
+		local saved = {}
+		for _, custom in ipairs(q.usedIn(doc)) do
+			saved[#saved + 1] = q.toSave(custom)
+		end
+		return saved
+end
+
+function q.adopt(list)
+		local added = 0
+		for _, saved in ipairs(list or {}) do
+			local custom = q.fromSave(saved)
+			if custom and not q.all[custom.id] then
+				if q.register(custom) then added = added + 1 end
+			end
+		end
+		return added
+end
+
+return q
+]]></ProtectedString>
+			</Properties>
+		</Item>
+	<Item class="ModuleScript" referent="RBX18">
+			<Properties>
+				<string name="Name">r</string>
+				<ProtectedString name="Source"><![CDATA[--!nonstrict
+-- r  ·  the block editor
+--
+-- Where a custom block is written.  Two ways in and out of the same thing:
+-- the panel here edits the Luau directly, and `open as canvas` turns that Luau
+-- into blocks, drops them on the canvas, and turns them back when you save.
+-- The placeholders survive the trip because the importer round-trips.
+
+local a = require(script.Parent.a)
+local b = require(script.Parent.b)
+local c = require(script.Parent.c)
+local d = require(script.Parent.d)
+local e = require(script.Parent.e)
+local q = require(script.Parent.q)
+
+local r = {}
+
+local KINDS = { "expr", "name", "str", "num", "multiline" }
+
+--=============================================================================
+-- the panel
+--=============================================================================
+
+local function labelled(parent, order, text, help)
+		local row = b.new("Frame", {
+			Size = UDim2.new(1, 0, 0, help and 38 or 24),
+			LayoutOrder = order,
+			Parent = parent,
+		})
+		b.text({
+			Text = text,
+			Size = UDim2.fromOffset(96, 22),
+			fg = "text2",
+			Parent = row,
+		})
+		if help then
+			b.text({
+				Text = help,
+				Size = UDim2.new(1, -100, 0, 14),
+				Position = UDim2.fromOffset(100, 22),
+				TextSize = 10,
+				fg = "text3",
+				Parent = row,
+			})
+		end
+		return row
+end
+
+local function textField(parent, value, placeholder, onChange, multiline)
+		local holder = b.new("Frame", {
+			Size = multiline and UDim2.new(1, -100, 0, 150) or UDim2.new(1, -100, 0, 22),
+			Position = UDim2.fromOffset(100, 0),
+			bg = "field",
+			stroke = { color = "fieldLine" },
+			radius = a.metric.radius,
+			Parent = parent,
+		})
+		local box = b.new("TextBox", {
+			Text = value or "",
+			PlaceholderText = placeholder or "",
+			ClearTextOnFocus = false,
+			MultiLine = multiline == true,
+			Size = UDim2.new(1, -12, 1, 0),
+			Position = UDim2.fromOffset(6, 0),
+			Font = a.font.mono,
+			TextSize = 12,
+			fg = "text",
+			ph = "text3",
+			TextXAlignment = Enum.TextXAlignment.Left,
+			TextYAlignment = multiline and Enum.TextYAlignment.Top or Enum.TextYAlignment.Center,
+			Parent = holder,
+		})
+		box:GetPropertyChangedSignal("Text"):Connect(function()
+			onChange(box.Text)
+		end)
+		return box
+end
+
+-- Opens the editor for an existing block, or a blank one when id is nil.
+-- `customId` opens one you already have; `seed` opens the editor on a block
+-- that has been built but not saved yet, which is how "from selection" and
+-- "from a module" arrive here.
+function r.open(app, customId, seed)
+		local overlay = b.overlay()
+		if not overlay then return end
+		if app.blockEditor then app.blockEditor:Destroy() end
+
+		local existing = customId and q.get(customId) or nil
+		local custom
+		if existing then
+			custom = q.fromSave(q.toSave(existing))
+			custom.id = existing.id
+			custom.fn = existing.fn
+		elseif seed then
+			custom = seed
+		else
+			custom = q.new("My block", "-- what this block should do")
+		end
+
+		local shade = b.new("Frame", {
+			Size = UDim2.fromScale(1, 1),
+			bg = "bg",
+			BackgroundTransparency = 0.4,
+			ZIndex = 940,
+			Parent = overlay,
+		})
+		app.blockEditor = shade
+
+		local panel = b.new("Frame", {
+			Size = UDim2.new(0, 620, 0, 560),
+			Position = UDim2.fromScale(0.5, 0.5),
+			AnchorPoint = Vector2.new(0.5, 0.5),
+			bg = "panel",
+			stroke = { color = "line" },
+			ZIndex = 941,
+			Parent = shade,
+		})
+
+		b.micro(existing and "edit a block" or "make a block", {
+			Size = UDim2.new(1, -24, 0, 22),
+			Position = UDim2.fromOffset(14, 10),
+			fg = "accent",
+			ZIndex = 942,
+			Parent = panel,
+		})
+
+		local scroll = b.new("ScrollingFrame", {
+			Size = UDim2.new(1, -24, 1, -86),
+			Position = UDim2.fromOffset(12, 34),
+			AutomaticCanvasSize = Enum.AutomaticSize.Y,
+			ZIndex = 942,
+			Parent = panel,
+		})
+		local column = b.new("Frame", {
+			Size = UDim2.new(1, -14, 0, 0),
+			AutomaticSize = Enum.AutomaticSize.Y,
+			layout = { dir = "y", gap = 8 },
+			ZIndex = 942,
+			Parent = scroll,
+		})
+
+		local order = 0
+		local function next_() order = order + 1 return order end
+
+		-- Declared up front because the fields below all want to redraw the preview
+		-- as they are typed into, and the preview is built further down.
+		local redraw
+
+		-- name and group ------------------------------------------------------------
+		local nameRow = labelled(column, next_(), "Name")
+		textField(nameRow, custom.label, "Give a coin", function(text)
+			custom.label = text
+			if redraw then redraw() end
+		end)
+
+		local groupRow = labelled(column, next_(), "Group",
+			"The heading it appears under in your category.")
+		textField(groupRow, custom.group, "Mine", function(text)
+			custom.group = text
+		end)
+
+		local wordingRow = labelled(column, next_(), "Wording",
+			"How it reads on the canvas. Use the same {holes} as the Luau.")
+		local wordingBox = textField(wordingRow, custom.wording or "", q.wordingOf(custom),
+			function(text)
+				custom.wording = text
+				if redraw then redraw() end
+			end)
+
+		local docRow = labelled(column, next_(), "Description",
+			"Shown in the tooltip, like every other block.")
+		textField(docRow, custom.doc, "What it does, and the catch.", function(text)
+			custom.doc = text
+		end)
+
+		-- the luau -------------------------------------------------------------------
+		local luauRow = labelled(column, next_(), "Luau",
+			"A {hole} inline is an input. A {hole} alone on a line is a slot.")
+		luauRow.Size = UDim2.new(1, 0, 0, 172)
+		local preview, inputList
+		textField(luauRow, custom.luau, "", function(text)
+			custom.luau = text
+			q.refresh(custom)
+			if redraw then redraw() end
+		end, true)
+
+		-- inputs and slots --------------------------------------------------------------
+		inputList = b.new("Frame", {
+			Size = UDim2.new(1, 0, 0, 0),
+			AutomaticSize = Enum.AutomaticSize.Y,
+			LayoutOrder = next_(),
+			layout = { dir = "y", gap = 4 },
+			ZIndex = 942,
+			Parent = column,
+		})
+
+		local returnsRow = b.new("Frame", {
+			Size = UDim2.new(1, 0, 0, 26),
+			LayoutOrder = next_(),
+			ZIndex = 942,
+			Parent = column,
+		})
+		b.text({
+			Text = "Gives a value back",
+			Size = UDim2.fromOffset(200, 22),
+			fg = "text2",
+			ZIndex = 943,
+			Parent = returnsRow,
+		})
+		local returnsButton = b.button({
+			label = custom.returns and "yes" or "no",
+			Size = UDim2.fromOffset(56, 22),
+			Position = UDim2.fromOffset(200, 0),
+			bg = custom.returns and "accentSoft" or "raised",
+			ZIndex = 943,
+			Parent = returnsRow,
+		})
+		b.tip(returnsButton, "A block that gives a value back reads as\n" ..
+			"`make x = ...` and can be used in any field.")
+
+		-- preview --------------------------------------------------------------------------
+		b.rule({ LayoutOrder = next_(), parent = column, bg = "lineSoft" })
+		b.micro("what it will write", {
+			Size = UDim2.new(1, 0, 0, 16),
+			LayoutOrder = next_(),
+			fg = "text3",
+			ZIndex = 942,
+			Parent = column,
+		})
+		preview = b.mono({
+			Text = "",
+			Size = UDim2.new(1, 0, 0, 0),
+			AutomaticSize = Enum.AutomaticSize.Y,
+			TextSize = 11,
+			fg = "text2",
+			TextYAlignment = Enum.TextYAlignment.Top,
+			LayoutOrder = next_(),
+			ZIndex = 942,
+			Parent = column,
+		})
+
+		-- keeps the inputs list and the preview in step with the Luau -------------------------
+		function redraw()
+			b.clear(inputList)
+			-- the placeholder shows the wording you would get for free, so it has to
+			-- follow the name and the holes
+			wordingBox.PlaceholderText = q.wordingOf(custom)
+			for index, field in ipairs(custom.fields) do
+				local row = b.new("Frame", {
+					Size = UDim2.new(1, 0, 0, 24),
+					LayoutOrder = index,
+					ZIndex = 942,
+					Parent = inputList,
+				})
+				b.mono({
+					Text = "{" .. field.key .. "}",
+					Size = UDim2.fromOffset(120, 22),
+					TextSize = 12,
+					fg = "accent",
+					ZIndex = 943,
+					Parent = row,
+				})
+
+				local kindButton = b.button({
+					label = field.kind,
+					Size = UDim2.fromOffset(80, 20),
+					Position = UDim2.fromOffset(124, 1),
+					ZIndex = 943,
+					Parent = row,
+				})
+				local kindText = kindButton:FindFirstChildWhichIsA("TextLabel")
+				b.tip(kindButton, "What sort of value belongs here. Expression fields\n" ..
+					"get the full completion list.")
+				kindButton.MouseButton1Click:Connect(function()
+					local at = table.find(KINDS, field.kind) or 1
+					field.kind = KINDS[(at % #KINDS) + 1]
+					kindText.Text = field.kind
+				end)
+
+				local holder = b.new("Frame", {
+					Size = UDim2.new(1, -212, 0, 22),
+					Position = UDim2.fromOffset(208, 0),
+					bg = "field",
+					stroke = { color = "fieldLine" },
+					radius = a.metric.radius,
+					ZIndex = 943,
+					Parent = row,
+				})
+				local defaultBox = b.new("TextBox", {
+					Text = field.default or "",
+					PlaceholderText = "default",
+					ClearTextOnFocus = false,
+					Size = UDim2.new(1, -12, 1, 0),
+					Position = UDim2.fromOffset(6, 0),
+					Font = a.font.mono,
+					TextSize = 11,
+					fg = "text",
+					ph = "text3",
+					ZIndex = 944,
+					Parent = holder,
+				})
+				defaultBox:GetPropertyChangedSignal("Text"):Connect(function()
+					field.default = defaultBox.Text
+				end)
+			end
+
+			if #custom.slots > 0 then
+				local names = {}
+				for _, slot in ipairs(custom.slots) do names[#names + 1] = slot.key end
+				b.text({
+					Text = "Slots: " .. table.concat(names, ", ") ..
+						"   (blocks with slots are written out in place, not as a function)",
+					Size = UDim2.new(1, 0, 0, 18),
+					TextSize = 10,
+					fg = "text3",
+					LayoutOrder = 900,
+					ZIndex = 942,
+					Parent = inputList,
+				})
+			end
+
+			-- preview: compile a throwaway copy and generate a single use
+			local trial = q.fromSave(q.toSave(custom))
+			trial.id = "preview"
+			trial.fn = custom.fn or q.functionName(custom.label)
+			q.unregister("preview")
+			local ok = q.register(trial)
+			if ok then
+				local def = c.get("custom_preview")
+				local doc = d.newDoc("preview")
+				local stack = d.newStack(doc, 0, 0)
+				local block = d.create(doc, def.id)
+				d.attachToStack(doc, block, stack, nil, {})
+				if #def.slots > 0 then
+					local inner = d.create(doc, "printText")
+					inner.f.msg = "your blocks here"
+					d.attachToSlot(doc, inner, block, def.slots[1].key, nil, {})
+				end
+				preview.Text = e.generate(doc, { header = false })
+				q.unregister("preview")
+			else
+				preview.Text = "-- this block does not compile yet"
+			end
+		end
+		returnsButton.MouseButton1Click:Connect(function()
+			custom.returns = not custom.returns
+			returnsButton:FindFirstChildWhichIsA("TextLabel").Text =
+				custom.returns and "yes" or "no"
+			b.states(returnsButton, custom.returns and "accentSoft" or "raised")
+			redraw()
+		end)
+
+		redraw()
+
+		-- buttons along the bottom ------------------------------------------------------------
+		local bar = b.new("Frame", {
+			Size = UDim2.new(1, -24, 0, 34),
+			Position = UDim2.new(0, 12, 1, -44),
+			layout = { dir = "x", gap = 6 },
+			ZIndex = 942,
+			Parent = panel,
+		})
+
+		local function close()
+			shade:Destroy()
+			app.blockEditor = nil
+		end
+
+		local canvasButton = b.button({
+			label = "Open as canvas",
+			Size = UDim2.fromOffset(126, 26),
+			LayoutOrder = 1,
+			ZIndex = 943,
+			Parent = bar,
+		})
+		b.tip(canvasButton, "Edit the inside as blocks. Your project is put back\n" ..
+			"when you finish.")
+		canvasButton.MouseButton1Click:Connect(function()
+			local doc, err = q.toCanvas(custom)
+			if not doc then
+				app:setStatus("that Luau does not parse: " ..
+					(err and err.msg or "unknown"))
+				return
+			end
+			app.customDraft = custom
+			app.customReturnTo = app.doc
+			app:setDoc(doc, "edit block")
+			app.editingCustom = custom.id
+			app:emit("editingCustom")
+			if app.showTab then app.showTab("build") end
+			app:setStatus("editing the block " .. custom.label)
+			close()
+		end)
+
+		if existing then
+			local copyButton = b.button({
+				label = "Duplicate",
+				Size = UDim2.fromOffset(90, 26),
+				LayoutOrder = 2,
+				ZIndex = 943,
+				Parent = bar,
+			})
+			copyButton.MouseButton1Click:Connect(function()
+				local copy = q.fromSave(q.toSave(custom))
+				copy.id = nil
+				copy = q.new(custom.label .. " copy", custom.luau)
+				copy.group, copy.doc, copy.wording = custom.group, custom.doc, custom.wording
+				copy.returns = custom.returns
+				app:putCustom(copy)
+				close()
+				r.open(app, copy.id)
+			end)
+
+			local deleteButton = b.button({
+				label = "Delete",
+				Size = UDim2.fromOffset(80, 26),
+				LayoutOrder = 3,
+				ZIndex = 943,
+				Parent = bar,
+			})
+			deleteButton.MouseButton1Click:Connect(function()
+				app:dropCustom(custom.id)
+				close()
+			end)
+		end
+
+		local cancel = b.button({
+			label = "Cancel",
+			Size = UDim2.fromOffset(80, 26),
+			Position = UDim2.new(1, -186, 0, 0),
+			ZIndex = 943,
+			Parent = bar,
+		})
+		cancel.MouseButton1Click:Connect(close)
+
+		local save = b.button({
+			label = "Save block",
+			Size = UDim2.fromOffset(100, 26),
+			Position = UDim2.new(1, -100, 0, 0),
+			bg = "accent",
+			labelColor = "accentInk",
+			ZIndex = 943,
+			Parent = bar,
+		})
+		save.MouseButton1Click:Connect(function()
+			q.refresh(custom)
+			if app:putCustom(custom) then close() end
+		end)
+
+		return shade
+end
+
+--=============================================================================
+-- editing one as a canvas
+--=============================================================================
+
+-- The strip that appears across the canvas while a block is open as blocks.
+function r.banner(app, parent)
+		local strip = b.new("Frame", {
+			Name = "EditingBlock",
+			Size = UDim2.new(1, 0, 0, 30),
+			bg = "accentSoft",
+			Visible = false,
+			ZIndex = 40,
+			Parent = parent,
+		})
+
+		local label = b.text({
+			Text = "",
+			Size = UDim2.new(1, -240, 1, 0),
+			Position = UDim2.fromOffset(14, 0),
+			Font = a.font.uiMedium,
+			fg = "text",
+			ZIndex = 41,
+			Parent = strip,
+		})
+
+		local saveButton = b.button({
+			label = "Save block",
+			Size = UDim2.fromOffset(100, 22),
+			Position = UDim2.new(1, -212, 0, 4),
+			bg = "accent",
+			labelColor = "accentInk",
+			ZIndex = 41,
+			Parent = strip,
+		})
+
+		local cancelButton = b.button({
+			label = "Cancel",
+			Size = UDim2.fromOffset(80, 22),
+			Position = UDim2.new(1, -100, 0, 4),
+			ZIndex = 41,
+			Parent = strip,
+		})
+
+		local function finish()
+			app.editingCustom = nil
+			app.customDraft = nil
+			if app.customReturnTo then
+				app:setDoc(app.customReturnTo, "back to the project")
+				app.customReturnTo = nil
+			end
+			app:emit("editingCustom")
+		end
+
+		saveButton.MouseButton1Click:Connect(function()
+			local custom = app.customDraft
+			if not custom then return end
+			q.fromCanvas(custom, app.doc)
+			app:putCustom(custom)
+			finish()
+		end)
+		cancelButton.MouseButton1Click:Connect(function()
+			app:setStatus("left the block as it was")
+			finish()
+		end)
+
+		local function paint()
+			local custom = app.customDraft
+			strip.Visible = app.editingCustom ~= nil and custom ~= nil
+			if custom then
+				label.Text = "Editing the block \"" .. custom.label ..
+					"\" -- the blocks below are its insides"
+			end
+		end
+		app:on("editingCustom", paint)
+		paint()
+
+		return strip
+end
+
+return r
+]]></ProtectedString>
+			</Properties>
+		</Item>
+	<Item class="ModuleScript" referent="RBX19">
 			<Properties>
 				<string name="Name">s</string>
 				<ProtectedString name="Source"><![CDATA[--!nonstrict
@@ -12950,7 +15247,7 @@ end
 ]]></ProtectedString>
 			</Properties>
 		</Item>
-	<Item class="ModuleScript" referent="RBX18">
+	<Item class="ModuleScript" referent="RBX20">
 			<Properties>
 				<string name="Name">t</string>
 				<ProtectedString name="Source"><![CDATA[--!nonstrict
@@ -13780,7 +16077,7 @@ end
 ]]></ProtectedString>
 			</Properties>
 		</Item>
-	<Item class="ModuleScript" referent="RBX19">
+	<Item class="ModuleScript" referent="RBX21">
 			<Properties>
 				<string name="Name">u</string>
 				<ProtectedString name="Source"><![CDATA[--!nonstrict
@@ -14946,7 +17243,7 @@ end
 ]]></ProtectedString>
 			</Properties>
 		</Item>
-	<Item class="ModuleScript" referent="RBX20">
+	<Item class="ModuleScript" referent="RBX22">
 			<Properties>
 				<string name="Name">v</string>
 				<ProtectedString name="Source"><![CDATA[--!nonstrict
@@ -16345,7 +18642,7 @@ end
 ]]></ProtectedString>
 			</Properties>
 		</Item>
-	<Item class="ModuleScript" referent="RBX21">
+	<Item class="ModuleScript" referent="RBX23">
 			<Properties>
 				<string name="Name">w</string>
 				<ProtectedString name="Source"><![CDATA[--!nonstrict

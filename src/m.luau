@@ -1406,6 +1406,12 @@ function View:contextMenu(block)
 				d.detach(doc, block, centre.X, centre.Y)
 			end)
 		end },
+		{ "Make into a block", "", function()
+			self.app:select(block.id)
+			if self.app.makeBlockFromSelection then
+				self.app.makeBlockFromSelection()
+			end
+		end },
 		{ "Delete", "Del", function() self:deleteSelected() end },
 	}
 

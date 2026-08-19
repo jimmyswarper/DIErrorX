@@ -1323,6 +1323,20 @@ function c.get(id)
 	return c.defs[id]
 end
 
+-- Custom blocks come and go as they are edited, so the registry has to be able
+-- to forget one.
+function c.undefine(id)
+	if not c.defs[id] then return false end
+	c.defs[id] = nil
+	for index, def in ipairs(c.order) do
+		if def.id == id then
+			table.remove(c.order, index)
+			break
+		end
+	end
+	return true
+end
+
 function c.byCat(catId)
 	local out = {}
 	for _, def in ipairs(c.order) do

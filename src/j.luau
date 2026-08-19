@@ -1,7 +1,8 @@
 --!nonstrict
 -- j  ·  tutorial content
 --
--- Twenty-six lessons: one per teaching category, then sixteen on the craft of
+-- Thirty-two lessons: one for each of the ten teaching categories, five more
+-- for the bigger systems people reach for next, and seventeen on the craft of
 -- using the editor and of writing Roblox code that behaves.
 --
 -- A step is a small tagged table, rendered by `k`:
@@ -788,7 +789,8 @@ T{
 	title = "The escape hatch",
 	blurb = "One block that takes any Luau at all, for when the palette runs out.",
 	steps = {
-		{ p = "There are 127 blocks. There are considerably more than 127 things you might want to write. The `raw Luau` block takes whatever you type and puts it in the output untouched, at the right indentation." },
+		{ p = "There are 680 blocks. There are considerably more than 680 things you might want to write. The `raw Luau` block takes whatever you type and puts it in the output untouched, at the right indentation." },
+		{ p = "Before reaching for it twice, though, consider making a block of your own. A custom block is the same raw Luau with named holes in it, and it gets a name, a place in the palette and a tooltip. The second time you write something is the moment to turn it into a block." },
 		{ blocks = "raw,comment" },
 		{ h = "What it is for" },
 		{ list = {
@@ -940,6 +942,303 @@ T{
 		} },
 		{ note = "You can come back. Select the script, convert it, rearrange it visually, and press Update to write it straight back. The round trip is stable, so a script can go through the blocks and come out as the same script." },
 	},
+}
+
+--=============================================================================
+-- lessons for the bigger systems
+--
+-- The ten teaching categories each get a lesson because they are the grammar.
+-- These five are the systems people reach for next, and each has a trap in it
+-- that costs a weekend to find on your own.
+--=============================================================================
+
+T{
+	id = "cat-ui", kind = "category", cat = "ui", minutes = 6,
+	level = "build",
+	title = "Interface: screens, buttons and text",
+	blurb = "Everything a player reads or clicks lives in their own copy of the screen, which changes where the code goes.",
+	steps = {
+		{ p = "A ScreenGui is a container Roblox draws flat on top of the 3D view. It goes in the player's PlayerGui, which belongs to that one player: change something in there and nobody else sees it. That single fact decides almost everything about interface code -- it runs on the player's own machine, in a LocalScript, and the server never sees the result." },
+		{ h = "Where the interface lives" },
+		{ p = "A ScreenGui holds frames, labels, buttons and images. Each of those is a GuiObject, and every GuiObject has a Position and a Size. Put the ScreenGui in StarterGui and Roblox copies it into each player as they arrive, or build it from a LocalScript and parent it to PlayerGui yourself." },
+		{ blocks = "uiScreen,uiLabel,uiButton,uiOnClick,uiPos,uiSize" },
+		{ code = 'local player = game:GetService("Players").LocalPlayer\nlocal gui = Instance.new("ScreenGui")\ngui.Parent = player:WaitForChild("PlayerGui")' },
+		{ h = "Scale and offset, and why both exist" },
+		{ p = "A UDim2 has two numbers per axis: a scale, which is a fraction of the parent, and an offset, which is a count of pixels. Scale keeps a layout looking the same on a phone and on a monitor. Offset keeps a border exactly two pixels thick no matter the screen. Most things want scale for position and size, and offset only for padding and outlines." },
+		{ code = 'label.Size = UDim2.fromScale(0.25, 0.08)\nlabel.Position = UDim2.fromScale(0.02, 0.02)\nlabel.BackgroundTransparency = 0.3' },
+		{ note = "The blocks come in pairs for this reason: `set {gui} size to {x} by {y}` takes fractions, and `set {gui} size to {w} by {h} pixels` takes pixels. Pick whichever the thing you are sizing actually cares about." },
+		{ h = "Reacting to a click" },
+		{ p = "A TextButton or ImageButton fires Activated when it is pressed, and that covers mouse, touch and gamepad in one event. There is also MouseButton1Click, which only covers the mouse -- prefer Activated unless you specifically want to exclude a phone." },
+		{ code = 'button.Activated:Connect(function()\n\tscore += 1\n\tlabel.Text = tostring(score)\nend)' },
+		{ warn = "A button on a player's screen is not proof of anything. If clicking it should cost coins or give an item, the click has to travel to the server through a RemoteEvent and be checked there. Anything decided only on the player's machine can be decided differently by a player who is cheating." },
+		{ try = "Build a score counter: a label, a button that adds one, and a second button that resets it. Then look at the Luau panel and notice that none of it touches the server." },
+	},
+	example = [[
+local Players = game:GetService("Players")
+
+local player = Players.LocalPlayer
+local gui = Instance.new("ScreenGui")
+gui.Name = "Score"
+gui.ResetOnSpawn = false
+gui.Parent = player:WaitForChild("PlayerGui")
+
+local label = Instance.new("TextLabel")
+label.Size = UDim2.fromScale(0.25, 0.08)
+label.Position = UDim2.fromScale(0.02, 0.02)
+label.BackgroundTransparency = 0.3
+label.Text = "0"
+label.Parent = gui
+
+local button = Instance.new("TextButton")
+button.Size = UDim2.fromOffset(120, 36)
+button.Position = UDim2.fromScale(0.02, 0.12)
+button.Text = "add one"
+button.Parent = gui
+
+local score = 0
+
+button.Activated:Connect(function()
+	score += 1
+	label.Text = tostring(score)
+end)
+]],
+}
+
+T{
+	id = "cat-save", kind = "category", cat = "save", minutes = 6,
+	level = "deep",
+	title = "Saving: data that outlives the round",
+	blurb = "A DataStore is the only place a number survives a player leaving, and it is the one place that is allowed to fail.",
+	steps = {
+		{ p = "Everything in a running Roblox place disappears when the server shuts down. A DataStore is a small key-value store that does not: you hand it a key and a value, and hours later on another server the same key gives the value back. It is the only Roblox feature that talks to a machine you do not control, and that changes how you have to write against it." },
+		{ h = "Get the store once, use the key every time" },
+		{ p = "GetDataStore names a store; the key names one player's slot inside it. Almost everyone uses the player's UserId in the key, because names change and UserIds do not. Build the key in one small function so every read and write agrees on its shape." },
+		{ blocks = "saveStore,saveKeyFor,saveLoad,saveSet,saveOnJoin,saveOnLeave" },
+		{ code = 'local store = DataStoreService:GetDataStore("Coins")\n\nlocal function keyFor(player)\n\treturn "player_" .. player.UserId\nend' },
+		{ h = "Every call can fail" },
+		{ p = "GetAsync and SetAsync go over the network. They can time out, they can be throttled, and they throw when they do. A DataStore call that is not wrapped in pcall will one day take your whole PlayerAdded handler down with it, and every player after that point joins with nothing." },
+		{ code = 'local ok, saved = pcall(function()\n\treturn store:GetAsync(keyFor(player))\nend)\nif not ok then\n\twarn("could not load")\nend' },
+		{ note = "`saved` is nil for a brand new player, and that is not an error -- it means there is nothing stored yet. Treat nil as your starting value rather than as a failure, and keep the two cases apart, because saving over a failed load is how progress gets erased." },
+		{ h = "Save on the way out, and on the way down" },
+		{ p = "PlayerRemoving fires when someone leaves. BindToClose fires when the whole server is shutting down, and it is your last chance to write anything -- Roblox waits a few seconds for it and then stops caring. A game that only saves on PlayerRemoving loses the last session of everyone who was still online at shutdown." },
+		{ warn = "There is a request budget, and it is smaller than it looks: roughly one write per key every six seconds. Saving on every coin pickup will be throttled and then dropped. Keep the value in memory, and write it on a timer and on the way out." },
+		{ try = "Give a player a Coins value that loads when they join and saves when they leave, then rejoin and check the number came back. Test it in Studio with Game Settings, Security, Enable Studio Access to API Services turned on." },
+	},
+	example = [[
+local DataStoreService = game:GetService("DataStoreService")
+local Players = game:GetService("Players")
+
+local store = DataStoreService:GetDataStore("Coins")
+
+local function keyFor(player)
+	return "player_" .. player.UserId
+end
+
+Players.PlayerAdded:Connect(function(player)
+	local ok, saved = pcall(function()
+		return store:GetAsync(keyFor(player))
+	end)
+
+	local coins = Instance.new("IntValue")
+	coins.Name = "Coins"
+	coins.Value = 0
+	coins.Parent = player
+
+	if ok and saved then
+		coins.Value = saved
+	end
+end)
+
+Players.PlayerRemoving:Connect(function(player)
+	local coins = player:FindFirstChild("Coins")
+	if coins then
+		pcall(function()
+			store:SetAsync(keyFor(player), coins.Value)
+		end)
+	end
+end)
+]],
+}
+
+T{
+	id = "cat-net", kind = "category", cat = "net", minutes = 6,
+	level = "deep",
+	title = "Networking: the server and the player",
+	blurb = "Two machines, one game. A RemoteEvent is the only door between them, and it does not lock itself.",
+	steps = {
+		{ p = "A Roblox game runs in two places at once. The server holds the truth: who has what, where everything is, what counts as a score. Each player's own machine runs a copy that draws the world and reads their keyboard. Neither can see the other's variables. A RemoteEvent is the door between them." },
+		{ h = "Which way the message goes" },
+		{ p = "The same RemoteEvent object is used from both sides, but the calls have different names depending on which way you are shouting. From a LocalScript you FireServer, and the server hears OnServerEvent. From the server you FireClient at one player or FireAllClients at everybody, and their LocalScripts hear OnClientEvent." },
+		{ blocks = "netMakeEvent,netToServer,netOnServerMessage,netToOne,netToAll,netOnClientMessage" },
+		{ code = 'remote.OnServerEvent:Connect(function(player, itemName)\n\tprint(player.Name .. " wants " .. itemName)\nend)' },
+		{ note = "The server always gets the player as the first argument, and it is added by Roblox rather than by the sender. That one argument is the only thing in the whole message you can trust, because a cheating player cannot forge it." },
+		{ h = "Everything else is a lie until you check it" },
+		{ p = "The arguments after that player came from someone else's machine, and a modified client can send anything at all: a number where you expected a string, a table a thousand entries deep, the name of an item that costs nothing. Check the type, check the value is one you actually sell, and check they can afford it -- on the server, every time." },
+		{ code = 'if typeof(itemName) ~= "string" then\n\treturn\nend\nif not SHOP[itemName] then\n\treturn\nend' },
+		{ warn = "A RemoteEvent can also be fired as fast as a script can loop. If yours does anything expensive, keep the time of each player's last call and drop anything that arrives too soon after it. Without that, one player can spend your whole server." },
+		{ h = "When you need an answer back" },
+		{ p = "A RemoteFunction waits for a reply, which is occasionally what you want and usually a trap: if the far side is slow, your code is stopped until it answers, and a client that never answers stops a server thread for good. Prefer two RemoteEvents -- one asking, one telling -- unless the reply is genuinely immediate." },
+		{ try = "Make a shop: a LocalScript that fires the server with an item name, and a server script that checks the name is one of three real items before printing the sale. Then try firing it with a number and watch your check catch it." },
+	},
+	example = [[
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+
+local remote = Instance.new("RemoteEvent")
+remote.Name = "BuyItem"
+remote.Parent = ReplicatedStorage
+
+local lastCall = {}
+
+remote.OnServerEvent:Connect(function(player, itemName)
+	if typeof(itemName) ~= "string" then
+		return
+	end
+
+	local now = os.clock()
+	local previous = lastCall[player.UserId]
+	if previous and now - previous < 0.5 then
+		return
+	end
+
+	lastCall[player.UserId] = now
+	print(player.Name .. " asked to buy " .. itemName)
+end)
+]],
+}
+
+T{
+	id = "cat-phys", kind = "category", cat = "phys", minutes = 6,
+	level = "build",
+	title = "Physics: pushing things about",
+	blurb = "Anchored parts sit still and unanchored parts fall. Everything else is a question of which force you reach for.",
+	steps = {
+		{ p = "A part is either anchored, in which case it stays exactly where you put it and nothing can move it, or it is not, in which case Roblox works out where it should be sixty times a second. Almost every physics problem starts with a part being in the wrong one of those two states." },
+		{ h = "Forces, not positions" },
+		{ p = "You can set a part's Position directly, but on an unanchored part that fights the simulation and looks like it. To move something physically you apply a force and let Roblox do the rest: an impulse for a single shove, a LinearVelocity for a steady push, an AlignPosition to drag something towards a point." },
+		{ blocks = "physPush,physKeepMoving,physHoldAt,physSpin,physStop" },
+		{ code = 'local push = Instance.new("LinearVelocity")\npush.VectorVelocity = Vector3.new(0, 0, -40)\npush.MaxForce = 20000\npush.Parent = part' },
+		{ note = "These movers attach to the part through an Attachment rather than to the part itself, which is why the blocks make one for you. The older BodyVelocity and BodyPosition still work but are deprecated, so the blocks here write the modern ones." },
+		{ h = "Asking what is there" },
+		{ p = "A raycast is a straight line thrown into the world that reports the first thing it hits. It is how a gun knows what it shot, how a foot knows what it is standing on, and how a camera knows a wall is in the way. You give it a start, a direction whose length is the range, and a list of things to ignore." },
+		{ code = 'local params = RaycastParams.new()\nparams.FilterDescendantsInstances = { character }\nlocal hit = workspace:Raycast(origin, Vector3.new(0, -5, 0), params)' },
+		{ p = "The result is nil when the ray hit nothing, so every raycast is followed by a check. When it did hit, the result carries the Instance, the Position where it landed and the Normal of the surface -- enough to place a bullet hole facing the right way." },
+		{ warn = "Collision groups are the quiet fix for most physics annoyances. If players are catching on scenery, or bullets are stopping on the shooter, the answer is usually two groups told to ignore each other rather than more code." },
+		{ try = "Make a launch pad: a part that, when touched, throws whatever touched it upwards with an impulse. Then add a check so it only launches characters." },
+	},
+	example = [[
+local part = script.Parent
+
+part.Anchored = false
+part.CanCollide = true
+
+local attachment = Instance.new("Attachment")
+attachment.Parent = part
+
+local push = Instance.new("LinearVelocity")
+push.Attachment0 = attachment
+push.VectorVelocity = Vector3.new(0, 0, -40)
+push.MaxForce = 20000
+push.Parent = part
+
+part.Touched:Connect(function(hit)
+	local humanoid = hit.Parent:FindFirstChildOfClass("Humanoid")
+	if humanoid then
+		local root = humanoid.RootPart
+		root:ApplyImpulse(Vector3.new(0, 600, 0))
+	end
+end)
+]],
+}
+
+T{
+	id = "cat-anim", kind = "category", cat = "anim", minutes = 6,
+	level = "build",
+	title = "Animation: making a character move",
+	blurb = "An Animation is an asset, a track is a copy of it playing on one character, and mixing those two up is the usual bug.",
+	steps = {
+		{ p = "An Animation instance is not a moving thing. It is a pointer at an asset you uploaded, and on its own it does nothing at all. To see movement you load it onto a particular character's Animator, which hands back an AnimationTrack: that track is the copy that is actually playing, and it is the thing you play, stop and speed up." },
+		{ h = "Load once, keep the track" },
+		{ p = "LoadAnimation is not free, and loading the same animation twice gives you two tracks that will fight each other. Load each animation once when the character appears, keep the track in a variable, and play that same track every time you need it." },
+		{ blocks = "animLoad,animPlay,animStop,animSpeed,animLoop" },
+		{ code = 'local animator = humanoid:WaitForChild("Animator")\nlocal track = animator:LoadAnimation(wave)\ntrack:Play()' },
+		{ note = "Load onto the Animator, not onto the Humanoid. Humanoid:LoadAnimation still works and is deprecated; the Animator is the object that actually owns playback, and on the client it is the only one that replicates properly." },
+		{ h = "Priority decides who wins" },
+		{ p = "Several tracks can play on one character at once, and priority settles what happens when they disagree about an arm. Idle loses to Movement, which loses to Action, which loses to Action4. A wave that plays but cannot be seen is nearly always a wave sitting at Idle underneath the walk cycle." },
+		{ code = 'track.Priority = Enum.AnimationPriority.Action\ntrack.Looped = false' },
+		{ h = "Characters come and go" },
+		{ p = "Every respawn is a brand new character model with a brand new Humanoid and Animator, and every track you loaded onto the old one is gone. Anything that sets up animations has to hang off CharacterAdded, and it has to run for the character that is already there when the script starts." },
+		{ warn = "An animation only plays if you own the asset or it belongs to the group the game belongs to. An animation that works in Studio and does nothing in a live game is almost always this, not your code." },
+		{ try = "Load a wave animation on spawn, play it when the player presses a key, and stop it when they move. You will need one track kept in a variable and two events." },
+	},
+	example = [[
+local Players = game:GetService("Players")
+
+local function setUp(character)
+	local humanoid = character:WaitForChild("Humanoid")
+	local animator = humanoid:WaitForChild("Animator")
+
+	local wave = Instance.new("Animation")
+	wave.AnimationId = "rbxassetid://507770239"
+
+	local track = animator:LoadAnimation(wave)
+	track.Priority = Enum.AnimationPriority.Action
+	track.Looped = false
+
+	humanoid.Died:Connect(function()
+		track:Stop()
+	end)
+
+	track:Play()
+end
+
+Players.PlayerAdded:Connect(function(player)
+	player.CharacterAdded:Connect(setUp)
+end)
+]],
+}
+
+T{
+	id = "tip-custom", kind = "tip", minutes = 5, level = "build",
+	title = "Blocks of your own",
+	blurb = "When you have written the same four blocks three times, turn them into one block and stop writing them.",
+	steps = {
+		{ p = "The palette covers the language and most of the Roblox API, but it does not cover your game. The bit you write over and over -- award coins, respawn at a checkpoint, fade a label out and back -- is yours, and you can make it a block." },
+		{ h = "What a block of yours actually is" },
+		{ p = "One thing: Luau with holes in it. Anywhere you write a name in curly brackets, you get a field on the block to fill in. That is the whole idea, and it is why there is no separate language to learn for making blocks." },
+		{ code = '{who}.Humanoid.Health += {amount}', partial = true },
+		{ p = "That becomes a block reading `Heal someone {who} {amount}` with two boxes on it. Type a character into one and a number into the other and it writes the line back out with your text in the holes." },
+		{ h = "A hole on its own line is a place for blocks" },
+		{ p = "There is one exception to the rule above, and it earns its keep. If a placeholder sits alone on a line with nothing else, it becomes a slot -- a mouth the block opens so you can drop other blocks inside it, the same way an if block does." },
+		{ code = 'if {who}:GetAttribute("Admin") then\n\t{body}\nend', partial = true },
+		{ h = "Four ways to get one" },
+		{ list = {
+			"Write the Luau yourself, with New block in the palette.",
+			"Select a stack on the canvas and choose Make into a block; the code it writes becomes the block.",
+			"Point at a define block and get a block that calls that function.",
+			"Point at a ModuleScript and get one block per function it exports.",
+		} },
+		{ p = "Whichever route you take, you land in the same editor, with the Luau in front of you and a live preview of what the block will read like on the canvas." },
+		{ h = "What it does to the generated script" },
+		{ p = "A block with no slots is written into your script once, as a real local function, no matter how many times you use it -- so ten uses cost you one function and ten short calls. A block with slots has to be written out in full at each use, because the blocks you dropped inside it are different every time." },
+		{ note = "You can open one of your blocks as a canvas and edit its insides with blocks, then save it back. The placeholders come along as ordinary names while you are in there, so they survive the trip." },
+		{ warn = "Your blocks live in your Studio, not in the place file. When one is worth keeping, use Save to a ModuleScript in setup: that writes the whole library into a script you can commit, share, or drop into another game." },
+		{ try = "Find something you have built twice. Select it, make it into a block, and use it in both places. Then look at the Luau and count how many times the body appears." },
+	},
+	example = [[
+local function healSomeone(who, amount)
+	who.Humanoid.Health += amount
+end
+
+local part = script.Parent
+
+part.Touched:Connect(function(hit)
+	local character = hit.Parent
+	local humanoid = character:FindFirstChild("Humanoid")
+	if humanoid then
+		healSomeone(character, 10)
+	end
+end)
+]],
 }
 
 --=============================================================================

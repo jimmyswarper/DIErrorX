@@ -381,6 +381,9 @@ function d.toSave(doc)
 		name = doc.name,
 		nextId = doc.nextId,
 		origin = doc.origin,
+		-- Custom blocks the document uses travel with it, so opening someone
+		-- else's project adds their blocks rather than breaking.
+		customs = doc.customs,
 		blocks = blocks,
 		stacks = stacks,
 	}
@@ -394,6 +397,9 @@ function d.fromSave(saved)
 
 	local doc = d.newDoc(saved.name)
 	doc.nextId = saved.nextId or 1
+	if type(saved.customs) == "table" then
+		doc.customs = saved.customs
+	end
 	if type(saved.origin) == "table" and saved.origin.kind then
 		doc.origin = {
 			kind = saved.origin.kind,

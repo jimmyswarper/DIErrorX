@@ -5,7 +5,9 @@
 -- editors: ink-on-paper colours, hairline rules instead of borders and drop
 -- shadows, sharp corners, a single ochre accent, and monospace for anything
 -- that is really code.  Category colours are printing inks -- muted, so a
--- canvas full of blocks reads as a document rather than a bag of sweets.
+-- canvas full of blocks reads as a document rather than a bag of sweets.  Every
+-- category has its own; they are close together on purpose, because the spine
+-- is a reminder of which subject a block came from rather than a label.
 --
 -- Instances register the token they are painted with, so switching between the
 -- ink and paper themes repaints the whole plugin without rebuilding it.
@@ -46,6 +48,24 @@ local INK = {
 		inst = Color3.fromRGB(154, 139, 106),
 		player = Color3.fromRGB(200, 110, 140),
 		data = Color3.fromRGB(107, 122, 143),
+
+		ui = Color3.fromRGB(70, 150, 165),
+		camera = Color3.fromRGB(196, 168, 92),
+		sound = Color3.fromRGB(160, 118, 196),
+		save = Color3.fromRGB(96, 148, 112),
+		net = Color3.fromRGB(86, 152, 190),
+		shop = Color3.fromRGB(204, 128, 70),
+		place = Color3.fromRGB(92, 160, 140),
+		phys = Color3.fromRGB(198, 108, 84),
+		anim = Color3.fromRGB(190, 100, 150),
+		npc = Color3.fromRGB(150, 156, 88),
+		terrain = Color3.fromRGB(160, 128, 92),
+		algo = Color3.fromRGB(108, 122, 196),
+		pattern = Color3.fromRGB(170, 112, 178),
+		vec = Color3.fromRGB(98, 138, 186),
+		debug = Color3.fromRGB(128, 146, 138),
+
+		custom = Color3.fromRGB(196, 174, 120),
 		special = Color3.fromRGB(120, 124, 132),
 	},
 	syntax = {
@@ -93,6 +113,24 @@ local PAPER = {
 		inst = Color3.fromRGB(116, 100, 62),
 		player = Color3.fromRGB(163, 68, 100),
 		data = Color3.fromRGB(70, 86, 110),
+
+		ui = Color3.fromRGB(40, 118, 132),
+		camera = Color3.fromRGB(150, 122, 42),
+		sound = Color3.fromRGB(118, 78, 158),
+		save = Color3.fromRGB(58, 110, 76),
+		net = Color3.fromRGB(48, 112, 150),
+		shop = Color3.fromRGB(160, 90, 34),
+		place = Color3.fromRGB(52, 120, 100),
+		phys = Color3.fromRGB(162, 74, 50),
+		anim = Color3.fromRGB(150, 62, 112),
+		npc = Color3.fromRGB(108, 114, 48),
+		terrain = Color3.fromRGB(120, 90, 56),
+		algo = Color3.fromRGB(70, 84, 158),
+		pattern = Color3.fromRGB(130, 74, 140),
+		vec = Color3.fromRGB(60, 100, 148),
+		debug = Color3.fromRGB(86, 104, 96),
+
+		custom = Color3.fromRGB(140, 118, 62),
 		special = Color3.fromRGB(96, 100, 108),
 	},
 	syntax = {

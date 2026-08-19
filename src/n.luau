@@ -16,6 +16,7 @@ local e = require(script.Parent.e)
 local f = require(script.Parent.f)
 local h = require(script.Parent.h)
 local o = require(script.Parent.o)
+local q = require(script.Parent.q)
 
 local ChangeHistoryService = game:GetService("ChangeHistoryService")
 local Selection = game:GetService("Selection")
@@ -1109,8 +1110,130 @@ function n.settingsView(app, parent)
 		end)
 	end
 
+	-- your own blocks ---------------------------------------------------------
+	-- Plugin settings live in one Studio install, so a library that is worth
+	-- keeping wants to be a ModuleScript: committed, dragged into a model, or
+	-- handed over in a place file.
+	local mine = section(column, 5, "your blocks")
+	local mineNote = b.text({
+		Text = "",
+		Size = UDim2.new(1, 0, 0, 30),
+		TextWrapped = true,
+		TextSize = 11,
+		fg = "text3",
+		LayoutOrder = 2,
+		Parent = mine,
+	})
+
+	local mineButtons = b.new("Frame", {
+		Size = UDim2.new(1, 0, 0, 26),
+		LayoutOrder = 3,
+		layout = { dir = "x", gap = 6 },
+		Parent = mine,
+	})
+
+	local function paintMine()
+		local count = #q.list()
+		mineNote.Text = count == 0
+			and ("You have not made any blocks yet. The palette has a \"your " ..
+				"blocks\" section at the bottom with a New block button, and " ..
+				"right-clicking anything on the canvas offers Make into a block.")
+			or (count .. (count == 1 and " block" or " blocks") ..
+				" of your own. Saving writes them into a ModuleScript you can " ..
+				"commit or share; loading reads one back.")
+	end
+	app:on("customs", paintMine)
+	app:on("doc", paintMine)
+	paintMine()
+
+	local newBlock = b.button({
+		label = "New block",
+		Size = UDim2.fromOffset(104, 26),
+		LayoutOrder = 1,
+		Parent = mineButtons,
+	})
+	newBlock.MouseButton1Click:Connect(function()
+		if app.openBlockEditor then app.openBlockEditor(nil) end
+	end)
+
+	local saveLibrary = b.button({
+		label = "Save to a ModuleScript",
+		Size = UDim2.fromOffset(172, 26),
+		LayoutOrder = 2,
+		Parent = mineButtons,
+	})
+	b.tip(saveLibrary, "Writes every block you have made into one ModuleScript.")
+	saveLibrary.MouseButton1Click:Connect(function()
+		local list = q.list()
+		if #list == 0 then
+			app:setStatus("no blocks of your own to save yet")
+			return
+		end
+		local source = q.toModuleSource(list, app.doc.name)
+		local recording = ChangeHistoryService:TryBeginRecording("ABlocks block library")
+		local ok, err = pcall(function()
+			local parentPath = app:destinationFor("ModuleScript")
+			local parent = o.resolvePath(parentPath)
+			if not parent then error("could not find " .. parentPath, 0) end
+			local made = Instance.new("ModuleScript")
+			made.Name = "ABlocksBlocks"
+			made.Source = source
+			made.Parent = parent
+			Selection:Set({ made })
+			return made
+		end)
+		if recording then
+			ChangeHistoryService:FinishRecording(recording,
+				ok and Enum.FinishRecordingOperation.Commit
+				or Enum.FinishRecordingOperation.Cancel)
+		end
+		if ok then
+			app:setStatus(string.format("saved %d blocks into ABlocksBlocks in %s",
+				#list, app:destinationFor("ModuleScript")))
+		else
+			n.textModal("could not save the library", tostring(err),
+				"Studio asks permission before a plugin may write script source.")
+		end
+	end)
+
+	local loadLibrary = b.button({
+		label = "Load from a ModuleScript",
+		Size = UDim2.fromOffset(186, 26),
+		LayoutOrder = 3,
+		Parent = mineButtons,
+	})
+	b.tip(loadLibrary, "Select a saved library in the Explorer first.\n" ..
+		"Loaded blocks are added, never overwritten.")
+	loadLibrary.MouseButton1Click:Connect(function()
+		local instance = Selection:Get()[1]
+		if not instance or not instance:IsA("ModuleScript") then
+			app:setStatus("select the ModuleScript in the Explorer first")
+			return
+		end
+		local source, readErr = readSource(instance)
+		if not source then
+			app:setStatus(readErr or "could not read that script")
+			return
+		end
+		local made, err = q.fromModuleSource(source)
+		if not made then
+			-- Not a saved library, then. A module of ordinary functions is
+			-- still useful: offer one block for each function it exports.
+			if app.makeBlocksFromModule and app.makeBlocksFromModule(instance) then
+				return
+			end
+			app:setStatus(tostring(err))
+			return
+		end
+		local added = 0
+		for _, custom in ipairs(made) do
+			if app:putCustom(custom) then added += 1 end
+		end
+		app:setStatus(string.format("added %d blocks from %s", added, instance.Name))
+	end)
+
 	-- shortcuts ---------------------------------------------------------------------
-	local keys = section(column, 5, "keyboard")
+	local keys = section(column, 6, "keyboard")
 	local list = {
 		{ "Ctrl+Z / Ctrl+Y", "undo, redo" },
 		{ "Delete", "remove the selected block and what follows it" },

@@ -8,7 +8,6 @@ local e = require(script.Parent.e)
 local g = require(script.Parent.g)
 
 eq("tutorials: at least twenty-five lessons", j.count() >= 25, true)
-eq("tutorials: exactly ten category lessons", #j.categories(), 10)
 check("tutorials: the rest are tips and technique", #j.tips() >= 15,
 	#j.tips() .. " tips")
 
@@ -20,11 +19,19 @@ for _, entry in ipairs(j.categories()) do
 	check("only one lesson per category: " .. tostring(entry.cat), not covered[entry.cat])
 	covered[entry.cat] = true
 end
+
+local core, extra = 0, 0
 for _, cat in ipairs(c.cats) do
 	if not cat.extra then
 		check("every teaching category has a lesson: " .. cat.id, covered[cat.id] == true)
+		if covered[cat.id] then core += 1 end
+	elseif covered[cat.id] then
+		extra += 1
 	end
 end
+eq("tutorials: the ten teaching categories are all covered", core, 10)
+check("tutorials: and a handful of the bigger systems too", extra >= 5,
+	extra .. " lessons beyond the core ten")
 
 -- shape ------------------------------------------------------------------------
 local ids = {}

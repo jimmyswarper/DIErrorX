@@ -306,7 +306,7 @@ function View:showTutorial(entry)
 		if cat then
 			b.micro(cat.name .. " blocks", {
 				Size = UDim2.fromOffset(140, 16),
-				fg = function(theme) return theme.cats[cat.id] end,
+				fg = function(theme) return theme.cats[cat.id] or theme.text2 end,
 				LayoutOrder = 4,
 				Parent = meta,
 			})

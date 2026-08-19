@@ -20,9 +20,12 @@ So the reference here is technical drafting and printed manuals:
 - **Sharp corners.** 2px radius on things you click, 0 everywhere else.
 - **One accent.** Ochre. It marks the current thing and nothing else — the
   active tab, the selected block, the drop indicator, the primary button.
-- **Printing inks for categories.** Ten muted hues, all roughly equal in
+- **Printing inks for categories.** A dozen muted hues, all roughly equal in
   weight, so a full canvas reads as a document rather than a bag of sweets.
-  A category shows as a 3px spine on the left edge of a block; that is all.
+  Twenty-seven categories share them rather than each getting one, because
+  twenty-seven distinguishable colours do not exist at this chroma and a
+  category is already named in the palette. A category shows as a 3px spine on
+  the left edge of a block; that is all.
 - **Monospace where it is code.** Block wording, fields, the code panel and the
   status bar are all `Enum.Font.Code`. Chrome — buttons, tabs, headings — is
   Gotham. The split tells you at a glance which text is yours and which is the
@@ -40,6 +43,26 @@ So the reference here is technical drafting and printed manuals:
 
 Everything sits on a 4px grid; block rows are 26px so a stack lines up with the
 canvas grid at 100% zoom.
+
+### Six hundred and eighty blocks in a list you can still read
+
+A palette of 680 is a different problem from a palette of 127, and the answer is
+four cuts rather than one long list:
+
+- **Categories collapse.** One is open at a time; the rest are one line each.
+- **Subgroups inside them.** A category declares a `group` per block, so
+  Interface arrives as *screens · boxes · text · buttons · images · layout ·
+  motion · input*, not sixty-nine rows in a row.
+- **Starred and recent, above everything.** Star what you use; the last dozen
+  blocks you placed sit under it. In practice this is the palette most of the
+  time, and the categories are for finding something new.
+- **A side filter.** Blocks declare `side = "server"` or `"client"` where it
+  matters. Set the filter to *fits* and a project heading for a LocalScript
+  stops offering DataStore blocks. It is off by default, because a filter you
+  did not ask for looks like a bug.
+
+Search cuts across all of it and groups its hits by category, so a search for
+"part" tells you which subject you are wandering into.
 
 ## The one structural decision
 
@@ -60,11 +83,58 @@ The cost of the hybrid is that you type. What it buys:
 The structure that matters pedagogically — what runs when, what is nested
 inside what, what the shape of a program is — is still entirely blocks.
 
+## Blocks made by the person using it
+
+The registry is fixed at build time; a game is not. Somewhere past the two
+hundredth block it stops being possible to guess what someone needs, and the
+honest answer is to let them write it.
+
+**One representation, not two.** A custom block is Luau with `{holes}` in it.
+Not a visual builder, not a schema, not a second little language — the same
+thing the built-in blocks are made of, written by hand. Everything else is
+derived: the fields come from the holes, the wording defaults to the label plus
+the holes, the tooltip shows the Luau with defaults filled in.
+
+**One special case, and it pays for itself.** A placeholder alone on a line
+becomes a *slot* rather than a field. That is the whole grammar for containers,
+and it means `if {who}:GetAttribute("Admin") then / {body} / end` is a block you
+can drop other blocks into.
+
+**Slots decide how it compiles.** No slots means the body is fixed, so it is
+hoisted into one `local function` and every use is a call. Slots mean the body
+differs per use, so it is inlined. The writer notices when an imported script
+already declares that function and does not write a second one — which is what
+makes a script with custom blocks in it round-trip.
+
+**Four routes, one editor.** Typed Luau, a stack on the canvas, a `define`
+block, or every function a ModuleScript exports. They all produce the same
+table and open the same editor, so there is one thing to learn and one thing to
+test.
+
+**Editing a block as blocks falls out of the importer.** `{x}` is rewritten to
+`__x`, the result is imported like any other script, edited, exported, and
+rewritten back. It needs no new machinery because the importer is already
+stable — the property that makes converting a script trustworthy makes this
+trustworthy too.
+
+**Sharing is a ModuleScript, and reading one cannot run it.** The library
+serialises to a plain Luau table, which is readable, diffable and hand-editable.
+Reading it back goes through the plugin's own parser and a constant evaluator
+that accepts strings, numbers, booleans and tables — never a call, never an
+index. Loading someone's library is therefore safe in the way `loadstring` would
+not have been.
+
 ## Rules the code follows
 
-**One definition per block.** `src/c.luau` holds the canvas wording and the
+**One definition per block.** A definition holds the canvas wording and the
 Luau on the same line. Anything derived from a block — palette entry, search
 text, tooltip, code, the field editors, the tests — comes from that one entry.
+`src/c.luau` owns the mechanics and the core categories; `s` through `w` are
+nothing but definitions, split by subject to keep any one file openable. They
+are passed the `define` function rather than requiring `c`, which is what keeps
+that from being a cycle. Custom blocks compile to exactly the same shape, so
+nothing downstream knows the difference — the code writer reads `def.custom`
+rather than requiring the custom-block module, for the same reason.
 
 **The importer only claims what it can give back.** A pattern is matched only
 when the block emits exactly the code it matched. `hum.WalkSpeed = 24` becomes
@@ -100,8 +170,15 @@ it and drives it.
 It is not a substitute for opening Studio, but it catches the class of bug that
 is otherwise only findable by opening Studio: a misspelled property, a nil
 index during a rebuild, a listener that accumulates on every render, an
-interaction that fires when it should not. Three real bugs came out of writing
-it, including one where attaching a block to a fresh stack deleted that stack.
+interaction that fires when it should not. Ten real bugs have come out of it so
+far, including one where attaching a block to a fresh stack deleted that stack,
+and one where a button passed a property Roblox does not have to `Instance.new`
+— which would have thrown on the first click in Studio.
+
+The mock is also why the whole custom-block path is tested end to end: opening
+the editor, typing Luau into it, saving, placing the block, checking the helper
+is written once, saving the library out to a ModuleScript and reading it back
+are all ordinary assertions rather than something you have to go and try.
 
 If you add a view, add it to the UI suite. If you add a block, the block suite
 picks it up on its own.

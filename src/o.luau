@@ -9,11 +9,13 @@
 
 local d = require(script.Parent.d)
 local c = require(script.Parent.c)
+local q = require(script.Parent.q)
 
 local HttpService = game:GetService("HttpService")
 
 local o = {}
 
+local KEY_CUSTOMS = "ablocks.customs.v1"
 local KEY_PROJECTS = "ablocks.projects.v1"
 local KEY_SETTINGS = "ablocks.settings.v1"
 local KEY_CURRENT = "ablocks.current.v1"
@@ -42,6 +44,9 @@ local DEFAULT_SETTINGS = {
 	showCode = true,
 	banner = true,
 	read = {},
+	favourites = {},
+	recents = {},
+	filterBySide = false,
 }
 
 local App = {}
@@ -165,9 +170,12 @@ function o.newApp(plugin, widget)
 	end
 	project = project or app.projects[1]
 
+	app:loadCustoms()
+
 	if project then
 		local restored = d.fromSave(project.doc)
 		app.doc = restored or starterDoc()
+		if app.doc.customs then q.adopt(app.doc.customs) end
 		app.projectId = project.id
 	else
 		app.doc = starterDoc()
@@ -182,7 +190,48 @@ end
 --=============================================================================
 
 local function snapshot(app)
+	app.doc.customs = q.embed(app.doc)
 	return d.toSave(app.doc)
+end
+
+--=============================================================================
+-- the custom block library
+--=============================================================================
+
+function App:loadCustoms()
+	local saved = readJson(self.plugin, KEY_CUSTOMS, nil)
+	if type(saved) ~= "table" then return 0 end
+	return q.adopt(saved)
+end
+
+function App:saveCustoms()
+	local out = {}
+	for _, custom in ipairs(q.list()) do
+		if custom.shared ~= false then out[#out + 1] = q.toSave(custom) end
+	end
+	writeJson(self.plugin, KEY_CUSTOMS, out)
+	self:emit("customs")
+end
+
+-- Adds or replaces one of your own blocks and tells everything to redraw.
+function App:putCustom(custom)
+	local ok, err = q.register(custom)
+	if not ok then
+		self:setStatus("that block would not build: " .. tostring(err))
+		return false, err
+	end
+	self:saveCustoms()
+	self:emit("doc")
+	self:setStatus("saved the block " .. custom.label)
+	return true
+end
+
+function App:dropCustom(id)
+	local custom = q.get(id)
+	q.unregister(id)
+	self:saveCustoms()
+	self:emit("doc")
+	if custom then self:setStatus("deleted the block " .. custom.label) end
 end
 
 -- Runs `edit`, having first stored a snapshot for undo.  Returns whatever the
@@ -286,6 +335,7 @@ end
 --=============================================================================
 
 function App:setDoc(doc, label)
+	if doc.customs then q.adopt(doc.customs) end
 	self.undoStack[#self.undoStack + 1] = { label = label or "replace", save = snapshot(self) }
 	if #self.undoStack > HISTORY_LIMIT then table.remove(self.undoStack, 1) end
 	self.redoStack = {}
@@ -364,6 +414,7 @@ function App:openProject(id)
 	for _, project in ipairs(self.projects) do
 		if project.id == id then
 			local restored = d.fromSave(project.doc)
+			if restored and restored.customs then q.adopt(restored.customs) end
 			if not restored then
 				self:setStatus("could not open " .. tostring(project.name))
 				return false
@@ -461,6 +512,30 @@ function o.resolvePath(path)
 		end
 	end
 	return target ~= game and target or nil
+end
+
+-- The other direction: what a generated script should write to reach this
+-- instance.  `GetFullName` starts at `game`, which is not spelt that way in
+-- code, so the first step becomes a GetService call.
+function o.pathTo(instance)
+	if not instance then return nil end
+	local pieces = {}
+	local at = instance
+	while at and at ~= game do
+		table.insert(pieces, 1, at.Name)
+		at = at.Parent
+	end
+	if #pieces == 0 then return nil end
+	local service = table.remove(pieces, 1)
+	local path = string.format("game:GetService(%q)", service)
+	for _, piece in ipairs(pieces) do
+		if string.match(piece, "^[%a_][%w_]*$") then
+			path ..= "." .. piece
+		else
+			path ..= string.format("[%q]", piece)
+		end
+	end
+	return path
 end
 
 -- Remembers which script in the place this project was read out of, so the

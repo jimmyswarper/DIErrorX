@@ -7,7 +7,9 @@ local d = require(script.Parent.d)
 local j = require(script.Parent.j)
 local m = require(script.Parent.m)
 local o = require(script.Parent.o)
+local i = require(script.Parent.i)
 local p = require(script.Parent.p)
+local q = require(script.Parent.q)
 
 local function noErrors(label)
 	if #MOCK_ERRORS > 0 then
@@ -631,6 +633,368 @@ do
 		a.listenerCount() <= baseline + 2,
 		string.format("%d listeners after twelve renders, was %d",
 			a.listenerCount(), baseline))
+end
+
+-- the palette's own sections ----------------------------------------------------
+do
+	shell.showTab("build")
+	local palette = shell.palette
+	palette.search.Text = ""
+
+	-- a big category is broken into subgroups rather than one long list
+	local biggest, most = nil, 0
+	for _, cat in ipairs(c.cats) do
+		local groups = {}
+		local count = 0
+		for _, def in ipairs(c.byCat(cat.id)) do
+			if not groups[def.group or "General"] then
+				groups[def.group or "General"] = true
+				count += 1
+			end
+		end
+		if count > most then biggest, most = cat, count end
+	end
+	check("some category has more than one subgroup", most > 1,
+		"every category is one flat list")
+
+	palette.openCat = biggest.id
+	palette:refresh()
+	MOCK.flush()
+	noErrors("opening a category is clean")
+	local firstGroup = nil
+	for _, def in ipairs(c.byCat(biggest.id)) do
+		firstGroup = firstGroup or def.group
+	end
+	check("an opened category shows its subgroup headings",
+		firstGroup == nil or MOCK.findText(palette.scroll, string.upper(firstGroup)) ~= nil,
+		"no heading for " .. tostring(firstGroup) .. " in " .. biggest.name)
+
+	-- starring a block puts it at the top
+	palette.openCat = nil
+	palette:toggleFavourite("printText")
+	MOCK.flush()
+	noErrors("starring a block is clean")
+	check("the starred strip appears", MOCK.findText(palette.scroll, "STARRED") ~= nil)
+	check("with the starred block in it",
+		MOCK.findText(palette.scroll, c.get("printText").label) ~= nil)
+	palette:toggleFavourite("printText")
+	MOCK.flush()
+	check("unstarring takes the strip away",
+		MOCK.findText(palette.scroll, "STARRED") == nil)
+
+	-- and using one puts it in recents
+	palette:remember("wait")
+	MOCK.flush()
+	check("the recent strip appears", MOCK.findText(palette.scroll, "RECENT") ~= nil)
+	check("recents survive a reload", (function()
+		for _, id in ipairs(app.settings.recents or {}) do
+			if id == "wait" then return true end
+		end
+		return false
+	end)())
+
+	-- search results are grouped by category
+	palette.search.Text = "part"
+	MOCK.flush()
+	noErrors("searching is clean")
+	check("search says how many matched",
+		MOCK.findText(palette.scroll, "MATCHING") ~= nil)
+	palette.search.Text = ""
+	MOCK.flush()
+end
+
+-- the side filter follows what kind of script this is ------------------------------
+do
+	local palette = shell.palette
+	local serverOnly, clientOnly = nil, nil
+	for _, def in ipairs(c.order) do
+		if def.side == "server" then serverOnly = serverOnly or def end
+		if def.side == "client" then clientOnly = clientOnly or def end
+	end
+	check("there are server-only blocks", serverOnly ~= nil)
+	check("there are client-only blocks", clientOnly ~= nil)
+
+	app:setSetting("filterBySide", true)
+	app:setScriptKind("LocalScript")
+	MOCK.flush()
+	check("a LocalScript hides the server-only blocks",
+		serverOnly == nil or not palette:allows(serverOnly), serverOnly and serverOnly.id)
+	check("and keeps the client-only ones",
+		clientOnly == nil or palette:allows(clientOnly))
+
+	app:setScriptKind("Script")
+	MOCK.flush()
+	check("a Script hides the client-only blocks",
+		clientOnly == nil or not palette:allows(clientOnly))
+	check("the palette redrew when the kind changed",
+		string.find(palette.filterLabel.Text, "Script", 1, true) ~= nil,
+		palette.filterLabel.Text)
+
+	app:setSetting("filterBySide", false)
+	MOCK.flush()
+	check("turning the filter off shows everything again",
+		palette:allows(clientOnly) and palette:allows(serverOnly))
+	noErrors("the side filter is clean")
+end
+
+-- making a block of your own -----------------------------------------------------
+do
+	shell.showTab("build")
+	local before = #q.list()
+
+	app.openBlockEditor(nil)
+	MOCK.flush()
+	noErrors("the block editor opens cleanly")
+	check("the editor is on screen", app.blockEditor ~= nil)
+	check("it says what it is", MOCK.findText(app.blockEditor, "MAKE A BLOCK") ~= nil)
+
+	-- fill it in the way a person would: a name and some Luau with a hole
+	local boxes = {}
+	for _, node in ipairs(app.blockEditor:GetDescendants()) do
+		if node:IsA("TextBox") then boxes[#boxes + 1] = node end
+	end
+	check("the editor has fields to fill in", #boxes >= 3, #boxes .. " text boxes")
+
+	boxes[1].Text = "Heal someone"
+	MOCK.fire(boxes[1], "FocusLost", false)
+	MOCK.flush()
+
+	local codeBox = nil
+	for _, node in ipairs(boxes) do
+		if node.MultiLine then codeBox = codeBox or node end
+	end
+	check("one of them takes the Luau", codeBox ~= nil)
+	if codeBox then
+		codeBox.Text = "{who}.Humanoid.Health += {amount}"
+		MOCK.fire(codeBox, "FocusLost", false)
+		MOCK.flush()
+		noErrors("typing the Luau is clean")
+		check("the editor noticed both holes",
+			MOCK.findText(app.blockEditor, "who") ~= nil
+			and MOCK.findText(app.blockEditor, "amount") ~= nil)
+		check("and previewed the wording",
+			MOCK.findText(app.blockEditor, "Heal someone") ~= nil)
+	end
+
+	local saveButton = nil
+	for _, node in ipairs(app.blockEditor:GetDescendants()) do
+		if node:IsA("TextLabel") and node.Text == "Save block" then
+			saveButton = node.Parent
+		end
+	end
+	check("the editor has a save button", saveButton ~= nil)
+	if saveButton then
+		MOCK.fire(saveButton, "MouseButton1Click")
+		MOCK.flush()
+		noErrors("saving a block is clean")
+		eq("the library grew by one", #q.list(), before + 1)
+		check("the editor closed", app.blockEditor == nil)
+	end
+
+	-- it is a real block now: place it and it writes real Luau
+	local mine = nil
+	for _, custom in ipairs(q.list()) do
+		if custom.label == "Heal someone" then mine = custom end
+	end
+	check("the block is in the library", mine ~= nil)
+	if mine then
+		local fresh = d.newDoc("Using my block")
+		d.newStack(fresh, 0, 0)
+		app:setDoc(fresh, "my block")
+		MOCK.flush()
+		local placed = app.canvas:addBlock("custom_" .. mine.id)
+		MOCK.flush()
+		noErrors("placing your own block is clean")
+		check("it drew on the canvas", app.canvas.frames[placed.id] ~= nil)
+		check("and it wrote the Luau",
+			string.find(shell.code.code, "Humanoid.Health", 1, true) ~= nil,
+			shell.code.code)
+		check("with the helper written out once",
+			string.find(shell.code.code, "local function " .. mine.fn, 1, true) ~= nil,
+			shell.code.code)
+	end
+
+	-- the palette shows it, with a way back into the editor
+	shell.palette.openCat = "custom"
+	shell.palette:refresh()
+	MOCK.flush()
+	check("your category lists it", MOCK.findText(shell.palette.scroll, "Heal someone") ~= nil)
+	check("and offers a new one", MOCK.findText(shell.palette.scroll, "New block") ~= nil)
+	shell.palette.openCat = nil
+	shell.palette:refresh()
+	MOCK.flush()
+end
+
+-- turning what is on the canvas into a block --------------------------------------
+do
+	shell.showTab("build")
+	local fresh = d.newDoc("To become a block")
+	local stack = d.newStack(fresh, 0, 0)
+	local first = d.create(fresh, "printText")
+	d.attachToStack(fresh, first, stack, nil, {})
+	app:setDoc(fresh, "canvas to block")
+	app:select(first.id)
+	MOCK.flush()
+
+	app.makeBlockFromSelection()
+	MOCK.flush()
+	noErrors("making a block from the canvas is clean")
+	check("the editor opened on it", app.blockEditor ~= nil)
+	check("seeded with the code those blocks write",
+		MOCK.findText(app.blockEditor, "print") ~= nil)
+
+	local cancel = nil
+	for _, node in ipairs(app.blockEditor:GetDescendants()) do
+		if node:IsA("TextLabel") and node.Text == "Cancel" then cancel = node.Parent end
+	end
+	check("it can be backed out of", cancel ~= nil)
+	if cancel then
+		MOCK.fire(cancel, "MouseButton1Click")
+		MOCK.flush()
+		check("cancelling closes it", app.blockEditor == nil)
+	end
+
+	-- and the canvas menu offers the same thing
+	app.canvas:contextMenu(first)
+	MOCK.flush()
+	noErrors("the canvas menu opens cleanly")
+	check("the menu offers to make a block",
+		MOCK.findText(app.canvas.menu, "Make into a block") ~= nil)
+	app.canvas.menu:Destroy()
+	app.canvas.menu = nil
+end
+
+-- your blocks are completed inside fields ------------------------------------------
+do
+	local helper = nil
+	for _, custom in ipairs(q.list()) do
+		if q.isHelper(custom) then helper = custom end
+	end
+	check("there is a helper block to complete", helper ~= nil)
+	if helper then
+		local result = i.complete({
+			text = string.sub(helper.fn, 1, 3),
+			cursor = 4,
+			doc = app.doc,
+			field = { kind = "expr" },
+		})
+		local found = false
+		for _, item in ipairs(result.items) do
+			if item.name == helper.fn then found = true end
+		end
+		check("IntelliSense offers your own block's function", found, helper.fn)
+	end
+end
+
+-- saving the library out to a ModuleScript ------------------------------------------
+do
+	shell.showTab("setup")
+	MOCK.flush()
+	check("settings has a section for your blocks",
+		MOCK.findText(shell.setup.frame, "YOUR BLOCKS") ~= nil)
+
+	local saveLibrary = nil
+	for _, node in ipairs(shell.setup.frame:GetDescendants()) do
+		if node:IsA("TextLabel") and node.Text == "Save to a ModuleScript" then
+			saveLibrary = node.Parent
+		end
+	end
+	check("and a button to save them out", saveLibrary ~= nil)
+	if saveLibrary then
+		MOCK.fire(saveLibrary, "MouseButton1Click")
+		MOCK.flush()
+		noErrors("saving the library is clean")
+		local made = game:GetService("Selection"):Get()[1]
+		check("it made a ModuleScript", made ~= nil and made:IsA("ModuleScript"),
+			made and made.ClassName or "nothing selected")
+		if made then
+			eq("named for the plugin", made.Name, "ABlocksBlocks")
+			local read = q.fromModuleSource(made.Source)
+			check("and the plugin can read it back", read ~= nil)
+			eq("with every block in it", read and #read or 0, #q.list())
+		end
+	end
+	-- and a plain module of functions becomes one block each
+	local helper = Instance.new("ModuleScript")
+	helper.Name = "Helper"
+	helper.Source = [[
+local Helper = {}
+
+function Helper.greet(name)
+	print("hello " .. name)
+end
+
+function Helper.farewell(name)
+	print("bye " .. name)
+end
+
+return Helper
+]]
+	helper.Parent = game:GetService("ReplicatedStorage")
+	eq("the plugin can spell the path to a module", o.pathTo(helper),
+		'game:GetService("ReplicatedStorage").Helper')
+
+	local loadLibrary = nil
+	for _, node in ipairs(shell.setup.frame:GetDescendants()) do
+		if node:IsA("TextLabel") and node.Text == "Load from a ModuleScript" then
+			loadLibrary = node.Parent
+		end
+	end
+	check("and a button to read one back in", loadLibrary ~= nil)
+
+	MOCK.select({ helper })
+	MOCK.flush()
+	local countBefore = #q.list()
+	if loadLibrary then
+		MOCK.fire(loadLibrary, "MouseButton1Click")
+		MOCK.flush()
+		noErrors("reading a module of functions is clean")
+		eq("one block per exported function", #q.list(), countBefore + 2)
+		local names = {}
+		for _, custom in ipairs(q.list()) do names[custom.label] = true end
+		check("named after the functions", names.greet and names.farewell)
+	end
+
+	-- and a library the plugin saved reads back as the same blocks
+	local saved = Instance.new("ModuleScript")
+	saved.Name = "SharedBlocks"
+	saved.Source = q.toModuleSource({ q.list()[1] }, "Shared")
+	saved.Parent = game:GetService("ReplicatedStorage")
+	MOCK.select({ saved })
+	MOCK.flush()
+	local beforeShared = #q.list()
+	if loadLibrary then
+		MOCK.fire(loadLibrary, "MouseButton1Click")
+		MOCK.flush()
+		noErrors("reading a saved library is clean")
+		eq("a saved library adds its blocks", #q.list(), beforeShared + 1)
+	end
+
+	shell.showTab("build")
+	MOCK.flush()
+end
+
+-- every category has an ink of its own, in both themes -----------------------------
+do
+	for _, theme in ipairs({ "ink", "paper" }) do
+		a.setTheme(theme)
+		local seen = {}
+		for _, cat in ipairs(c.cats) do
+			local colour = a.catColor(cat.id)
+			check(theme .. ": " .. cat.id .. " has a colour",
+				colour ~= nil and colour ~= a.c.text2,
+				"it would fall back to grey")
+			local key = string.format("%d,%d,%d",
+				math.floor(colour.R * 255), math.floor(colour.G * 255),
+				math.floor(colour.B * 255))
+			check(theme .. ": " .. cat.id .. " does not share an ink", not seen[key],
+				"same as " .. tostring(seen[key]))
+			seen[key] = cat.id
+		end
+	end
+	a.setTheme(app.settings.theme or "ink")
+	MOCK.flush()
+	noErrors("repainting for the colour check is clean")
 end
 
 -- warnings ------------------------------------------------------------------------------------------------

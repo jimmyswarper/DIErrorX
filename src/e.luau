@@ -31,6 +31,8 @@ local function newWriter()
 		depth = 0,
 		needs = {},
 		declared = {},
+		declaredFunctions = {},
+		helpers = {},
 	}, Writer)
 end
 
@@ -45,6 +47,10 @@ function Writer:line(text, owner)
 	-- Notice services the author declared by hand so the preamble stays quiet.
 	local name = string.match(body, '^local%s+([%a_][%w_]*)%s*=%s*game:GetService')
 	if name then self.declared[name] = true end
+	-- Same for functions: a custom block's helper is not written twice if the
+	-- document already defines one by that name.
+	local fn = string.match(body, "^local%s+function%s+([%a_][%w_]*)")
+	if fn then self.declaredFunctions[fn] = true end
 	return #self.lines
 end
 
@@ -116,6 +122,26 @@ local function emitBlock(w, doc, block)
 		return
 	end
 
+	-- Custom blocks with no slots compile to one function at the top and a
+	-- call here; ones with slots fall through and inline, because what goes
+	-- inside them changes from use to use.
+	local custom = def.custom
+	if custom and (custom.helper or custom.returnsHelper) then
+		local args = {}
+		for _, key in ipairs(custom.params) do
+			args[#args + 1] = c.fieldValue(def, block, key)
+		end
+		local call = custom.fn .. "(" .. table.concat(args, ", ") .. ")"
+		w.helpers[custom.fn] = custom
+		if custom.returnsHelper then
+			w:line("local " .. c.fieldValue(def, block, custom.out) .. " = " .. call,
+				block.id)
+		else
+			w:line(call, block.id)
+		end
+		return
+	end
+
 	if def.elseifCollapse then
 		emitIfChain(w, doc, block, "if")
 		w:line("end", block.id)
@@ -127,10 +153,13 @@ local function emitBlock(w, doc, block)
 	end
 
 	for _, slot in ipairs(def.slots) do
-		if slot.codePre then
+		local lead = slot.codePreLines or (slot.codePre and { slot.codePre })
+		if lead then
 			local at = slot.codeIndent or (def.bodyIndent - 1)
 			w:push(at)
-			w:line(fillLine(def, block, slot.codePre), block.id)
+			for _, line in ipairs(lead) do
+				w:tpl(fillLine(def, block, line), block.id)
+			end
 			w:pop(at)
 		end
 		w:push(def.bodyIndent)
@@ -182,6 +211,36 @@ function e.generate(doc, opts)
 			string.format('local %s = game:GetService("%s")', service, service)
 	end
 
+	-- helper functions for the custom blocks that were used
+	local helperNames = {}
+	for name in pairs(w.helpers) do
+		if not w.declaredFunctions[name] then helperNames[#helperNames + 1] = name end
+	end
+	table.sort(helperNames)
+
+	local helpers = {}
+	for _, name in ipairs(helperNames) do
+		local custom = w.helpers[name]
+		helpers[#helpers + 1] = string.format("local function %s(%s)", name,
+			table.concat(custom.params, ", "))
+		for _, line in ipairs(custom.body) do
+			-- inside the helper the placeholders are simply its parameters
+			local filled = string.gsub(line, "{([%a_][%w_]*)}", "%1")
+			helpers[#helpers + 1] = filled == "" and "" or ("\t" .. filled)
+		end
+		if custom.returns then
+			-- a value-producing block's body is the expression to hand back
+			helpers[#helpers] = nil
+			local body = {}
+			for _, line in ipairs(custom.body) do
+				body[#body + 1] = (string.gsub(line, "{([%a_][%w_]*)}", "%1"))
+			end
+			helpers[#helpers + 1] = "\treturn " .. table.concat(body, " ")
+		end
+		helpers[#helpers + 1] = "end"
+		helpers[#helpers + 1] = ""
+	end
+
 	local head = {}
 	if opts.header ~= false then
 		head[#head + 1] = "-- " .. (doc.name or "Untitled")
@@ -192,6 +251,7 @@ function e.generate(doc, opts)
 		for _, line in ipairs(preamble) do head[#head + 1] = line end
 		head[#head + 1] = ""
 	end
+	for _, line in ipairs(helpers) do head[#head + 1] = line end
 
 	local out = {}
 	local blockOfLine = {}

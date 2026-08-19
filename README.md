@@ -12,13 +12,16 @@ changes straight back into that same script.
 │ ≡ ABlocks   BUILD  LEARN  IMPORT  SETUP              First project  ◑│
 ├──────────────┬───────────────────────────────┬───────────────────────┤
 │ / search     │ ▏when script.Parent is        │ Script      12 lines  │
-│              │ ▏  touched by hit             ├───────────────────────┤
-│ E Events  13 │ ▏  ┌ make hum = the humanoid  │ 1  script.Parent      │
-│ C Control 16 │ ▏  │   of hit.Parent          │ 2    .Touched:Connect │
-│ ? Logic   12 │ ▏  │ stop here unless hum     │ 3    local hum = hit  │
-│ N Math    11 │ ▏  └ teleport hit.Parent to   │ 4    if not hum then  │
-│ T Text    13 │ ▏    (0, 10, 0)               │ 5      return         │
-│ x Vars    10 │                               │ 6    end              │
+│ fits Script  │ ▏  touched by hit             ├───────────────────────┤
+│              │ ▏  ┌ make hum = the humanoid  │ 1  script.Parent      │
+│ STARRED      │ ▏  │   of hit.Parent          │ 2    .Touched:Connect │
+│  ★ print     │ ▏  │ stop here unless hum     │ 3    local hum = hit  │
+│              │ ▏  └ teleport hit.Parent to   │ 4    if not hum then  │
+│ E Events  31 │ ▏    (0, 10, 0)               │ 5      return         │
+│ C Control 30 │                               │ 6    end              │
+│ ? Logic   26 │ ▏heal hit.Parent by 25        │ 7  end)               │
+│ U Interfa 69 │                               │ 8                     │
+│ + My bloc  1 │                               │ 9  healSomeone(...)   │
 ├──────────────┴───────────────────────────────┴───────────────────────┤
 │ undo redo tidy 100% save            Script   copy   Update Trap      │
 ├──────────────────────────────────────────────────────────────────────┤
@@ -57,23 +60,34 @@ directions; nothing else in the plugin touches your game.
 
 ## What is in it
 
-**127 blocks across ten categories** — events, control, logic, math, text,
-variables, functions, instances, players and data — plus an escape hatch for raw
-Luau. Every block declares what it looks like and what it compiles to on the
-same line, so the canvas and the code can never drift apart.
+**680 blocks across 27 categories.** Ten teach the language — events, control,
+logic, math, text, variables, functions, instances, players, data — and fifteen
+cover the systems you reach for next: interface, camera and light, sound,
+saving, networking, shop, places, physics, animation, NPCs, terrain, lists and
+sorting, text patterns, space and angles, debug and timing. Then a category of
+your own blocks, and an escape hatch for raw Luau. Every block declares what it
+looks like and what it compiles to on the same line, so the canvas and the code
+can never drift apart.
 
-**26 tutorials**, one per category and sixteen more on technique: snapping,
-reading the code panel, server versus client, loops that do not freeze the game,
-error messages translated, tags and attributes, and how to tell when you have
-outgrown blocks. Most carry a runnable example that the lesson can rebuild on
-your canvas in one click.
+**Blocks you make yourself.** A block of yours is Luau with `{holes}` in it —
+each hole becomes a field, and a hole alone on a line becomes a slot you can
+drop other blocks into. Write one by hand, or point at a stack on the canvas, a
+`define` block, or a whole ModuleScript and get blocks back. See
+[below](#making-your-own-blocks).
+
+**32 tutorials**: one for each of the ten teaching categories, five for the
+bigger systems, and seventeen on technique — snapping, reading the code panel,
+server versus client, loops that do not freeze the game, error messages
+translated, tags and attributes, and how to tell when you have outgrown blocks.
+Most carry a runnable example that the lesson can rebuild on your canvas in one
+click.
 
 **IntelliSense** in every expression field. It knows the difference between `.`
 and `:`, resolves types through property chains, reads your own variables out of
 the document — a `make door = a new Part` block above teaches it that `door.`
-should offer `Anchored` — completes class names inside `Instance.new("`, and
-shows signature help while the caret is inside a call. Matching is fuzzy, so
-`ffc` finds `FindFirstChild`.
+should offer `Anchored` — completes class names inside `Instance.new("`, offers
+the functions your own blocks compile to, and shows signature help while the
+caret is inside a call. Matching is fuzzy, so `ffc` finds `FindFirstChild`.
 
 **A Luau importer** that handles the whole language: types, string
 interpolation, `+=`, `continue`, nested closures. Two rules keep it honest —
@@ -108,6 +122,55 @@ ServerStorage, a server Script asking for `Players.LocalPlayer`. Rules of thumb
 rather than analysis, but they catch the mistake that costs beginners an
 afternoon.
 
+## Making your own blocks
+
+Everything above is the language and the API. The part that is yours — award
+coins, respawn at a checkpoint, fade a label out and back — becomes a block of
+your own.
+
+A custom block has exactly one representation: **Luau with holes in it.**
+
+```lua
+{who}.Humanoid.Health += {amount}
+```
+
+That is a block reading `Heal someone {who} {amount}` with two fields on it. A
+placeholder that sits *alone on a line* is the one special case — it becomes a
+slot, a mouth the block opens so other blocks can go inside:
+
+```lua
+if {who}:GetAttribute("Admin") then
+	{body}
+end
+```
+
+Four ways to get one, all landing in the same editor with a live preview:
+
+| route | where |
+|---|---|
+| write the Luau yourself | **New block**, in the palette or on Setup |
+| a stack already on the canvas | right-click → **Make into a block** |
+| a `define` block in the project | right-click it → **Make into a block** |
+| every function a ModuleScript exports | select it → **Load from a ModuleScript** |
+
+**What it costs in the generated script.** A block with no slots is written out
+once, as a real `local function`, however many times you use it — ten uses cost
+one function and ten short calls. A block *with* slots is inlined at each use,
+because the blocks you dropped inside it differ every time.
+
+You can also open one of your blocks **as a canvas** and edit its insides with
+blocks, then save it back; the placeholders travel as ordinary names while you
+are in there. This works because the importer is stable — the same property
+that makes converting a script safe makes editing a block safe.
+
+Your library lives in your Studio settings, and projects carry a copy of every
+block they use, so opening someone else's project adds their blocks rather than
+breaking. When a library is worth keeping, **Setup → your blocks → Save to a
+ModuleScript** writes the whole thing out as a plain Luau table you can commit,
+share or drop into another game — and **Load from a ModuleScript** reads it
+back. The reader uses the plugin's own parser and accepts only constants, so
+loading someone's library cannot run their code.
+
 ## A design decision worth knowing about
 
 Statements are blocks; expressions are typed into fields.
@@ -124,33 +187,36 @@ inside what — is still blocks.
 
 ## The code
 
-Sixteen modules, one letter each, in `src/`:
+Twenty-three modules, one letter each, in `src/`:
 
 | | |
 |---|---|
 | `a` | theme: colours, type, spacing, ink/paper switching |
 | `b` | interface primitives over `Instance.new` |
-| `c` | the block registry — 127 definitions, wording and Luau together |
+| `c` | the block registry — mechanics, categories, and the core blocks |
 | `d` | the document model: blocks, slots, stacks, save format |
 | `e` | code generation, service hoisting, `elseif` collapsing |
 | `f` | Luau lexer (also drives syntax highlighting) |
 | `g` | Luau parser, recording byte spans |
 | `h` | Luau → blocks importer |
 | `i` | IntelliSense: API surface, type resolution, fuzzy matching |
-| `j` | the 26 tutorials |
+| `j` | the 32 tutorials |
 | `k` | tutorials tab |
 | `l` | palette |
 | `m` | canvas: rendering, dragging, snapping, zoom, field editing |
 | `n` | code panel, import tab, settings |
 | `o` | application state, undo, projects, saving |
 | `p` | the window: top tabs, bottom action bar, keyboard |
+| `q` | custom blocks: shape, compilation, the four creation routes, sharing |
+| `r` | the block editor, and the banner shown while editing one as a canvas |
+| `s`–`w` | the other 553 block definitions, grouped by subject |
 
 `src/init.server.luau` is the plugin script itself and does nothing but make the
 toolbar button and hand over to `p`.
 
 ### Adding a block
 
-One entry in `src/c.luau`:
+One entry in `src/c.luau` (or in `s`–`w`, whichever subject fits):
 
 ```lua
 D{ id = "shout", cat = "text", label = "shout",
@@ -162,9 +228,11 @@ D{ id = "shout", cat = "text", label = "shout",
 
 `head` is what appears on the canvas, `code` is what it compiles to, and
 `{msg}` refers to the field declared below. Slots (`slots = {{key="body"}}`)
-make it a container; `tail = "end"` closes it. That is the whole extension
-point — the palette, search, tooltips, code generation and tests all pick it up
-from there.
+make it a container; `tail = "end"` closes it. `group` puts it under a
+sub-heading inside its category, and `side = "server"` or `"client"` lets the
+palette filter it out when the project is heading for the wrong kind of script.
+That is the whole extension point — the palette, search, tooltips, code
+generation and tests all pick it up from there.
 
 ### Teaching the importer a new pattern
 
@@ -189,22 +257,25 @@ tools/test.sh                # or LUAU=/path/to/luau tools/test.sh
 
 ```
 syntax
-  ok    17 modules compile
+  ok    24 modules compile
 suites
-  ok    blocks (816 checks)          every block emits valid Luau
+  ok    blocks (4403 checks)         every block emits valid Luau
+  ok    custom blocks (61 checks)    making, compiling, sharing your own
   ok    intellisense (46 checks)     contexts, type resolution, ranking
-  ok    parser (65 checks)           lexer and parser against real scripts
-  ok    roundtrip (20 checks)        code → blocks → code is stable
-  ok    tutorials (823 checks)       examples import; prose claims hold up
-  ok    ui (102 checks)              the whole plugin, mounted headlessly
+  ok    parser (109 checks)          lexer and parser against real scripts
+  ok    roundtrip (21 checks)        code → blocks → code is stable
+  ok    tutorials (1051 checks)      examples import; prose claims hold up
+  ok    ui (340 checks)              the whole plugin, mounted headlessly
 ```
 
 The UI suite is the unusual one. `tests/mock.luau` is a small Roblox stand-in —
 instances, signals, services, a real JSON implementation — strict enough to
 reject any property name Roblox does not have. The suite mounts the entire
-plugin against it, renders all 127 blocks and all 26 lessons, drags a block into
-a loop, imports a script, undoes it and switches themes. It found three real
-bugs while it was being written.
+plugin against it, renders all 680 blocks and all 32 lessons, drags a block into
+a loop, imports a script, makes a block of its own and uses it, saves the
+library out to a ModuleScript and reads it back, undoes it all and switches
+themes. It has found ten real bugs so far, including one that would have
+crashed Studio on the first click.
 
 `tools/bundle.py` stitches the modules together for the CLI, since Roblox's
 `require(script.Parent.x)` has no meaning outside Studio.

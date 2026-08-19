@@ -1,24 +1,27 @@
 --!nonstrict
 -- l  ·  the palette
 --
--- The list of blocks on the left.  Categories behave as an accordion -- one
--- open at a time -- and the search box collapses the whole thing into one
--- ranked list.  Search matches the wording on the block, the Luau it writes and
--- its description, so `connect` finds the event blocks even though none of them
--- say "connect" on the front.
+-- Seven hundred blocks need more than one long list, so this has four things
+-- the old palette did not: subgroups inside each category, a strip of recent
+-- and starred blocks at the top, search results grouped by category, and a
+-- filter that hides server-only blocks while you are building a LocalScript.
 --
 -- A row can be clicked (drops the block on the canvas near your selection) or
--- dragged straight onto the canvas.
+-- dragged straight onto it.  Your own blocks live in their own category, with
+-- the group names you gave them.
 
 local a = require(script.Parent.a)
 local b = require(script.Parent.b)
 local c = require(script.Parent.c)
 local i = require(script.Parent.i)
+local q = require(script.Parent.q)
 
 local UserInputService = game:GetService("UserInputService")
 local RunService = game:GetService("RunService")
 
 local l = {}
+
+local RECENT_LIMIT = 6
 
 local View = {}
 View.__index = View
@@ -34,7 +37,6 @@ local function rank(query, def)
 	if string.find(def.searchText, query, 1, true) then
 		best = math.max(best or 0, 24)
 	end
-	-- the first word of the label matching is worth more than a scattered hit
 	local firstWord = string.match(def.label, "^%S+")
 	if firstWord and string.sub(string.lower(firstWord), 1, #query) == query then
 		best = (best or 0) + 30
@@ -42,13 +44,15 @@ local function rank(query, def)
 	return best
 end
 
-function l.search(query)
+function l.search(query, allowed)
 	query = string.lower(string.match(query or "", "^%s*(.-)%s*$"))
 	if query == "" then return nil end
 	local hits = {}
 	for _, def in ipairs(c.order) do
-		local score = rank(query, def)
-		if score then hits[#hits + 1] = { def = def, score = score } end
+		if not allowed or allowed(def) then
+			local score = rank(query, def)
+			if score then hits[#hits + 1] = { def = def, score = score } end
+		end
 	end
 	table.sort(hits, function(x, y)
 		if x.score ~= y.score then return x.score > y.score end
@@ -60,24 +64,21 @@ function l.search(query)
 end
 
 --=============================================================================
--- rows
+-- what belongs in this project
 --=============================================================================
 
--- The Luau a block writes, with its defaults filled in -- shown in the tooltip
--- so you can see what you are about to add.
-local function sampleCode(def)
-	local lines = {}
-	for _, template in ipairs(def.codeLines) do
-		lines[#lines + 1] = (string.gsub(
-			c.fill(c.parseTemplate(template), def, { f = {} }), "^\t", ""))
-	end
-	if #def.slots > 0 then lines[#lines + 1] = "\t..." end
-	for _, template in ipairs(def.codeTailLines or {}) do
-		lines[#lines + 1] = (string.gsub(
-			c.fill(c.parseTemplate(template), def, { f = {} }), "^\t", ""))
-	end
-	return table.concat(lines, "\n")
+function View:allows(def)
+	if not self.app.settings.filterBySide then return true end
+	if not def.side then return true end
+	local kind = self.app:scriptKind()
+	if kind == "LocalScript" then return def.side ~= "server" end
+	if kind == "Script" then return def.side ~= "client" end
+	return true
 end
+
+--=============================================================================
+-- rows
+--=============================================================================
 
 function View:blockRow(def, order)
 	local row = b.new("TextButton", {
@@ -96,7 +97,7 @@ function View:blockRow(def, order)
 
 	b.mono({
 		Text = def.label,
-		Size = UDim2.new(1, -34, 1, 0),
+		Size = UDim2.new(1, -48, 1, 0),
 		Position = UDim2.fromOffset(12, 0),
 		TextSize = 12,
 		fg = "text",
@@ -104,11 +105,35 @@ function View:blockRow(def, order)
 		Parent = row,
 	})
 
-	local plus = b.mono({
+	-- starring keeps a block at the top of the palette
+	local favourites = self.app.settings.favourites or {}
+	local star = b.new("TextButton", {
+		Size = UDim2.fromOffset(18, 24),
+		Position = UDim2.new(1, -38, 0, 0),
+		bg = "panel",
+		BackgroundTransparency = 1,
+		Parent = row,
+	})
+	local starMark = b.mono({
 		Text = "+",
+		Size = UDim2.fromScale(1, 1),
+		TextSize = 13,
+		fg = favourites[def.id] and "accent" or "text3",
+		TextTransparency = favourites[def.id] and 0 or 1,
+		TextXAlignment = Enum.TextXAlignment.Center,
+		Parent = star,
+	})
+	b.tip(star, favourites[def.id] and "Remove from your starred blocks."
+		or "Keep this block at the top of the palette.")
+	star.MouseButton1Click:Connect(function()
+		self:toggleFavourite(def.id)
+	end)
+
+	local plus = b.mono({
+		Text = ">",
 		Size = UDim2.fromOffset(16, 24),
-		Position = UDim2.new(1, -20, 0, 0),
-		TextSize = 14,
+		Position = UDim2.new(1, -18, 0, 0),
+		TextSize = 12,
 		fg = "text3",
 		TextXAlignment = Enum.TextXAlignment.Center,
 		TextTransparency = 1,
@@ -118,13 +143,20 @@ function View:blockRow(def, order)
 	b.hover(row, function()
 		row.BackgroundColor3 = a.c.raised
 		plus.TextTransparency = 0
+		if not favourites[def.id] then starMark.TextTransparency = 0.45 end
 	end, function()
 		row.BackgroundColor3 = a.c.panel
 		plus.TextTransparency = 1
+		if not favourites[def.id] then starMark.TextTransparency = 1 end
 	end)
 
 	b.tip(row, function()
-		return def.doc .. "\n\n" .. sampleCode(def)
+		local parts = { def.doc }
+		if def.side then
+			parts[#parts + 1] = "\nOnly works on the " .. def.side .. "."
+		end
+		parts[#parts + 1] = "\n" .. def.sample
+		return table.concat(parts, "")
 	end)
 
 	-- click to place, drag to carry
@@ -143,12 +175,14 @@ function View:blockRow(def, order)
 				if not carried and (now - start).Magnitude > 6 then
 					carried = true
 					b.hideTip()
+					self:remember(def.id)
 					canvas:spawnAndDrag(def.id, now)
 					return
 				end
 				RunService.Heartbeat:Wait()
 			end
 			if not carried then
+				self:remember(def.id)
 				canvas:addBlock(def.id)
 				self.app:setStatus("added " .. def.label)
 			end
@@ -158,7 +192,16 @@ function View:blockRow(def, order)
 	return row
 end
 
-function View:categoryHeader(cat, order, open)
+function View:heading(text, order, token)
+	return b.micro(text, {
+		Size = UDim2.new(1, 0, 0, 18),
+		LayoutOrder = order,
+		fg = token or "text3",
+		Parent = self.scroll,
+	})
+end
+
+function View:categoryHeader(cat, order, open, count)
 	local header = b.new("TextButton", {
 		Size = UDim2.new(1, 0, 0, 28),
 		LayoutOrder = order,
@@ -179,7 +222,7 @@ function View:categoryHeader(cat, order, open)
 	})
 
 	b.mono({
-		Text = tostring(#c.byCat(cat.id)),
+		Text = tostring(count),
 		Size = UDim2.fromOffset(24, 28),
 		Position = UDim2.new(1, -40, 0, 0),
 		TextSize = 10,
@@ -203,6 +246,37 @@ function View:categoryHeader(cat, order, open)
 
 	b.tip(header, cat.blurb)
 	return header
+end
+
+--=============================================================================
+-- state
+--=============================================================================
+
+function View:toggleFavourite(defId)
+	local favourites = {}
+	for key, value in pairs(self.app.settings.favourites or {}) do
+		favourites[key] = value
+	end
+	favourites[defId] = (not favourites[defId]) or nil
+	self.app:setSetting("favourites", favourites)
+	self:refresh()
+end
+
+function View:remember(defId)
+	local recents = {}
+	for _, id in ipairs(self.app.settings.recents or {}) do
+		if id ~= defId then recents[#recents + 1] = id end
+	end
+	table.insert(recents, 1, defId)
+	while #recents > RECENT_LIMIT do
+		recents[#recents] = nil
+	end
+	self.app:setSetting("recents", recents)
+	self:refresh()
+end
+
+function View:focusSearch()
+	self.search:CaptureFocus()
 end
 
 --=============================================================================
@@ -257,19 +331,48 @@ function l.mount(app, parent)
 		view.query = view.search.Text
 		view:refresh()
 	end)
-	-- Ctrl+F, a few letters, Enter: the block lands without touching the mouse.
 	view.search.FocusLost:Connect(function(enterPressed)
 		if not enterPressed or not view.topHit then return end
 		if app.canvas then
+			view:remember(view.topHit.id)
 			app.canvas:addBlock(view.topHit.id)
 			app:setStatus("added " .. view.topHit.label)
 		end
 	end)
 
+	-- the side filter ------------------------------------------------------------
+	local filterRow = b.new("Frame", {
+		Size = UDim2.new(1, -20, 0, 20),
+		Position = UDim2.fromOffset(10, 42),
+		Parent = view.frame,
+	})
+	view.filterLabel = b.mono({
+		Text = "",
+		Size = UDim2.new(1, -60, 1, 0),
+		TextSize = 10,
+		fg = "text3",
+		Parent = filterRow,
+	})
+	local filterButton = b.button({
+		label = "all",
+		Size = UDim2.fromOffset(54, 18),
+		Position = UDim2.new(1, -54, 0, 1),
+		Parent = filterRow,
+	})
+	local filterText = filterButton:FindFirstChildWhichIsA("TextLabel")
+	b.tip(filterButton, "Show every block, or only the ones that work in the\n" ..
+		"kind of script this project is heading for.")
+	filterButton.MouseButton1Click:Connect(function()
+		app:setSetting("filterBySide", not app.settings.filterBySide)
+		filterText.Text = app.settings.filterBySide and "fits" or "all"
+		view:refresh()
+	end)
+	filterText.Text = app.settings.filterBySide and "fits" or "all"
+
 	-- list --------------------------------------------------------------------
 	view.scroll = b.new("ScrollingFrame", {
-		Size = UDim2.new(1, -6, 1, -46),
-		Position = UDim2.fromOffset(0, 44),
+		Size = UDim2.new(1, -6, 1, -70),
+		Position = UDim2.fromOffset(0, 68),
 		Parent = view.frame,
 	})
 	view.layout = b.new("UIListLayout", {
@@ -285,75 +388,227 @@ function l.mount(app, parent)
 	-- dropping a block back onto the palette throws it away
 	app:on("dragOverPalette", function(over)
 		view.frame.BackgroundColor3 = over and a.c.err:Lerp(a.c.panel, 0.75) or a.c.panel
-		if over then
-			app:setStatus("release to delete")
-		end
+		if over then app:setStatus("release to delete") end
 	end)
 
+	app:on("customs", function() view:refresh() end)
+	app:on("doc", function() view:refreshIfKindChanged() end)
 	a.onChange(function() view:refresh() end)
 	view:refresh()
 	return view
 end
 
-function View:focusSearch()
-	self.search:CaptureFocus()
+-- The side filter depends on the script kind, so the palette follows it.
+function View:refreshIfKindChanged()
+	local kind = self.app:scriptKind()
+	if kind ~= self.lastKind then
+		self.lastKind = kind
+		self:refresh()
+	end
 end
+
+--=============================================================================
+-- drawing
+--=============================================================================
 
 function View:refresh()
 	b.clear(self.scroll)
-	local order = 1
+	local order = 0
+	local function next_() order = order + 1 return order end
 
-	local hits = l.search(self.query)
+	local allowed = function(def) return self:allows(def) end
+	local kind = self.app:scriptKind()
+	self.lastKind = kind
+	self.filterLabel.Text = self.app.settings.filterBySide
+		and ("showing what fits a " .. kind) or "showing every block"
+
+	-- search results, grouped by category ---------------------------------------
+	local hits = l.search(self.query, allowed)
 	self.topHit = hits and hits[1] or nil
 	if hits then
-		b.micro(#hits .. " matching", {
-			Size = UDim2.new(1, 0, 0, 20),
-			LayoutOrder = order,
-			Parent = self.scroll,
-		})
-		order = order + 1
-		for _, def in ipairs(hits) do
-			self:blockRow(def, order).Parent = self.scroll
-			order = order + 1
-		end
 		if #hits == 0 then
 			b.text({
-				Text = "Nothing matches. Try a word from the Luau you want,\nsuch as 'clone' or 'wait'.",
+				Text = "Nothing matches. Try a word from the Luau you want,\nsuch as 'clone' or 'tween'.",
 				Size = UDim2.new(1, 0, 0, 44),
 				TextWrapped = true,
 				fg = "text3",
-				LayoutOrder = order,
+				LayoutOrder = next_(),
 				Parent = self.scroll,
 			})
+			return
+		end
+
+		local byCat, catOrder = {}, {}
+		for _, def in ipairs(hits) do
+			if not byCat[def.cat] then
+				byCat[def.cat] = {}
+				catOrder[#catOrder + 1] = def.cat
+			end
+			table.insert(byCat[def.cat], def)
+		end
+
+		self:heading(#hits .. " matching", next_(), "accent")
+		for _, catId in ipairs(catOrder) do
+			local cat = c.catById[catId]
+			self:heading(cat.name .. "  " .. #byCat[catId], next_())
+			for _, def in ipairs(byCat[catId]) do
+				self:blockRow(def, next_()).Parent = self.scroll
+			end
 		end
 		return
 	end
 
+	-- starred and recent ----------------------------------------------------------
+	local favourites = self.app.settings.favourites or {}
+	local starred = {}
+	for defId in pairs(favourites) do
+		local def = c.get(defId)
+		if def then starred[#starred + 1] = def end
+	end
+	table.sort(starred, function(x, y) return x.label < y.label end)
+	if #starred > 0 then
+		self:heading("starred", next_(), "accent")
+		for _, def in ipairs(starred) do
+			self:blockRow(def, next_()).Parent = self.scroll
+		end
+		b.spacer(8, next_()).Parent = self.scroll
+	end
+
+	local recents = {}
+	for _, defId in ipairs(self.app.settings.recents or {}) do
+		local def = c.get(defId)
+		if def and not favourites[defId] then recents[#recents + 1] = def end
+	end
+	if #recents > 0 then
+		self:heading("recent", next_())
+		for _, def in ipairs(recents) do
+			self:blockRow(def, next_()).Parent = self.scroll
+		end
+		b.spacer(8, next_()).Parent = self.scroll
+	end
+
+	-- categories -------------------------------------------------------------------
 	for _, cat in ipairs(c.cats) do
+		local blocks = {}
+		for _, def in ipairs(c.byCat(cat.id)) do
+			if allowed(def) then blocks[#blocks + 1] = def end
+		end
+
 		local open = self.openCat == cat.id
-		self:categoryHeader(cat, order, open).Parent = self.scroll
-		order = order + 1
+		self:categoryHeader(cat, next_(), open, #blocks).Parent = self.scroll
 
 		if open then
-			b.rule({ LayoutOrder = order, parent = self.scroll, bg = "lineSoft" })
-			order = order + 1
+			b.rule({ LayoutOrder = next_(), parent = self.scroll, bg = "lineSoft" })
 			b.text({
 				Text = cat.blurb,
 				Size = UDim2.new(1, 0, 0, 30),
 				TextWrapped = true,
 				TextSize = 11,
 				fg = "text3",
-				LayoutOrder = order,
+				LayoutOrder = next_(),
 				Parent = self.scroll,
 			})
-			order = order + 1
-			for _, def in ipairs(c.byCat(cat.id)) do
-				self:blockRow(def, order).Parent = self.scroll
-				order = order + 1
+
+			if cat.id == "custom" then
+				self:customControls(next_)
 			end
-			b.spacer(10, order).Parent = self.scroll
-			order = order + 1
+
+			-- subgroups keep a category of seventy readable
+			local groups, byGroup = {}, {}
+			for _, def in ipairs(blocks) do
+				local group = def.group or "General"
+				if not byGroup[group] then
+					byGroup[group] = {}
+					groups[#groups + 1] = group
+				end
+				table.insert(byGroup[group], def)
+			end
+
+			for _, group in ipairs(groups) do
+				if #groups > 1 then
+					self:heading(group, next_())
+				end
+				for _, def in ipairs(byGroup[group]) do
+					self:blockRow(def, next_()).Parent = self.scroll
+				end
+			end
+
+			if #blocks == 0 then
+				b.text({
+					Text = cat.id == "custom"
+						and "You have not made any blocks yet."
+						or "Nothing here fits a " .. kind .. ". Switch the filter to see them.",
+					Size = UDim2.new(1, 0, 0, 30),
+					TextWrapped = true,
+					TextSize = 11,
+					fg = "text3",
+					LayoutOrder = next_(),
+					Parent = self.scroll,
+				})
+			end
+			b.spacer(10, next_()).Parent = self.scroll
 		end
+	end
+end
+
+-- The buttons at the top of your own category.
+function View:customControls(next_)
+	local row = b.new("Frame", {
+		Size = UDim2.new(1, 0, 0, 28),
+		LayoutOrder = next_(),
+		layout = { dir = "x", gap = 6 },
+		Parent = self.scroll,
+	})
+
+	local make = b.button({
+		label = "New block",
+		Size = UDim2.fromOffset(96, 24),
+		LayoutOrder = 1,
+		bg = "accent",
+		labelColor = "accentInk",
+		Parent = row,
+	})
+	b.tip(make, "Write a block of your own, out of Luau with {holes} in it.")
+	make.MouseButton1Click:Connect(function()
+		if self.app.openBlockEditor then self.app.openBlockEditor(nil) end
+	end)
+
+	local fromCanvas = b.button({
+		label = "From selection",
+		Size = UDim2.fromOffset(110, 24),
+		LayoutOrder = 2,
+		Parent = row,
+	})
+	b.tip(fromCanvas, "Turn the selected block, and everything under it,\ninto a block of your own.")
+	fromCanvas.MouseButton1Click:Connect(function()
+		if self.app.makeBlockFromSelection then self.app.makeBlockFromSelection() end
+	end)
+
+	-- one edit row per block you have made
+	for _, custom in ipairs(q.list()) do
+		local editRow = b.new("Frame", {
+			Size = UDim2.new(1, 0, 0, 20),
+			LayoutOrder = next_(),
+			Parent = self.scroll,
+		})
+		b.mono({
+			Text = custom.label,
+			Size = UDim2.new(1, -60, 1, 0),
+			Position = UDim2.fromOffset(12, 0),
+			TextSize = 11,
+			fg = "text3",
+			TextTruncate = Enum.TextTruncate.AtEnd,
+			Parent = editRow,
+		})
+		local edit = b.button({
+			label = "edit",
+			Size = UDim2.fromOffset(46, 18),
+			Position = UDim2.new(1, -48, 0, 1),
+			Parent = editRow,
+		})
+		edit.MouseButton1Click:Connect(function()
+			if self.app.openBlockEditor then self.app.openBlockEditor(custom.id) end
+		end)
 	end
 end
 

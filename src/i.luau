@@ -15,6 +15,7 @@
 --   result.items[1].name  --> "Anchored"
 
 local d = require(script.Parent.d)
+local q = require(script.Parent.q)
 
 local i = {}
 
@@ -665,6 +666,27 @@ local function addDocSymbols(items, query, doc)
 	end
 end
 
+-- Blocks you made yourself that carry no slots become a real `local function`
+-- in the generated script, so their names are worth completing: this is how
+-- you call one of your own blocks from inside a field.
+local function addCustomHelpers(items, query)
+	for _, custom in ipairs(q.list()) do
+		if q.isHelper(custom) and custom.fn then
+			local names = {}
+			for _, field in ipairs(custom.fields) do names[#names + 1] = field.key end
+			local signature = custom.fn .. "(" .. table.concat(names, ", ") .. ")"
+			push(items, {
+				name = custom.fn,
+				kind = "function",
+				detail = signature,
+				doc = "Your block \"" .. custom.label .. "\". It is written into " ..
+					"the script as a function the first time you use it.",
+				insert = custom.fn .. "(",
+			}, query)
+		end
+	end
+end
+
 --=============================================================================
 -- entry point
 --=============================================================================
@@ -786,6 +808,7 @@ function i.complete(request)
 	end
 
 	addDocSymbols(items, context.query, doc)
+	addCustomHelpers(items, context.query)
 	addGlobals(items, context.query)
 	for _, snippet in ipairs(SNIPPETS) do
 		push(items, {

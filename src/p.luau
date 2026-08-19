@@ -17,6 +17,8 @@ local l = require(script.Parent.l)
 local m = require(script.Parent.m)
 local n = require(script.Parent.n)
 local o = require(script.Parent.o)
+local q = require(script.Parent.q)
+local r = require(script.Parent.r)
 
 local UserInputService = game:GetService("UserInputService")
 
@@ -24,7 +26,7 @@ local p = {}
 
 local TABS = {
 	{ id = "build", label = "build", hint = "The canvas, the palette and the generated Luau." },
-	{ id = "learn", label = "learn", hint = "Twenty-six lessons, from first block to first script." },
+	{ id = "learn", label = "learn", hint = "Thirty-two lessons, from first block to first script." },
 	{ id = "import", label = "import", hint = "Turn a script you have selected into blocks." },
 	{ id = "setup", label = "setup", hint = "Projects, where scripts go, theme, shortcuts." },
 }
@@ -476,13 +478,28 @@ function p.mount(app, widget)
 		Parent = pages,
 	})
 
-	shell.palette = l.mount(app, buildPage)
+	-- While a custom block is open as a canvas a strip sits above everything
+	-- saying so; the rest of the page slides down to make room for it.
+	local editBanner = r.banner(app, buildPage)
+
+	local buildBody = b.new("Frame", {
+		Name = "Body",
+		Size = UDim2.fromScale(1, 1),
+		Parent = buildPage,
+	})
+	app:on("editingCustom", function()
+		local shown = editBanner.Visible
+		buildBody.Position = shown and UDim2.fromOffset(0, 30) or UDim2.fromOffset(0, 0)
+		buildBody.Size = shown and UDim2.new(1, 0, 1, -30) or UDim2.fromScale(1, 1)
+	end)
+
+	shell.palette = l.mount(app, buildBody)
 
 	local middle = b.new("Frame", {
 		Name = "Middle",
 		Size = UDim2.new(1, -236, 1, 0),
 		Position = UDim2.fromOffset(236, 0),
-		Parent = buildPage,
+		Parent = buildBody,
 	})
 
 	local canvasHolder = b.new("Frame", {
@@ -527,6 +544,54 @@ function p.mount(app, widget)
 			and UDim2.new(1, -418, 0, 8) or UDim2.new(1, -26, 0, 8)
 		foldMark.Rotation = app.settings.showCode and -90 or 90
 	end)
+
+	-- your own blocks ------------------------------------------------------------
+	-- The palette and the canvas menu both reach the editor through the app, so
+	-- neither of them has to know that r exists.
+	app.openBlockEditor = function(customId, seed)
+		r.open(app, customId, seed)
+	end
+
+	app.makeBlockFromSelection = function()
+		local block = app:selected()
+		if not block then
+			app:setStatus("select a block on the canvas first, then try again")
+			shell.showTab("build")
+			return
+		end
+		local custom
+		if block.k == "def" then
+			-- a define block becomes a block that *calls* the function, which is
+			-- almost always what someone means by "make this into a block"
+			custom = q.fromFunctionBlock(app.doc, block)
+		end
+		custom = custom or q.fromBlocks(app.doc, block)
+		shell.showTab("build")
+		r.open(app, nil, custom)
+	end
+	-- One block per function a ModuleScript exports.  Returns whether it found
+	-- anything, so the caller can fall back to its own message.
+	app.makeBlocksFromModule = function(instance)
+		local path = o.pathTo(instance)
+		if not path then
+			app:setStatus("that module is not in the game tree")
+			return false
+		end
+		local made = q.fromModule(instance, path)
+		if not made then return false end
+		if #made == 1 then
+			-- one function is worth looking at before it is saved
+			r.open(app, nil, made[1])
+			return true
+		end
+		local added = 0
+		for _, custom in ipairs(made) do
+			if app:putCustom(custom) then added = added + 1 end
+		end
+		app:setStatus(string.format("made %d blocks from the functions in %s",
+			added, instance.Name))
+		return true
+	end
 
 	-- other tabs -------------------------------------------------------------------
 	shell.learn = k.mount(app, pages)

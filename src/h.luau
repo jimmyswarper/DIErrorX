@@ -182,10 +182,39 @@ local function convertConnect(ctx, call, verb)
 	return fill(ctx, mk(ctx, kind, fields), "body", body)
 end
 
+-- Custom blocks compile to a call to a named helper, so a call to one of those
+-- names rebuilds the block rather than arriving as a plain call.
+local function customByFunctionName()
+	local map = {}
+	for _, def in ipairs(c.order) do
+		if def.custom and def.custom.fn then map[def.custom.fn] = def end
+	end
+	return map
+end
+
+local function convertCustomCall(ctx, call, path, wanted)
+	if not path then return nil end
+	local def = customByFunctionName()[path]
+	if not def then return nil end
+	if def.custom.returnsHelper ~= (wanted == "value") then return nil end
+	if #call.args ~= #def.custom.params then return nil end
+
+	local fields = {}
+	for index, key in ipairs(def.custom.params) do
+		fields[key] = slice(ctx, call.args[index])
+	end
+	return def, fields
+end
+
 local function convertCallStatement(ctx, stmt)
 	local call = stmt.call
 	local args = call.args
 	local path = not call.method and g.pathOf(call.fn) or nil
+
+	local customDef, customFields = convertCustomCall(ctx, call, path, "statement")
+	if customDef then
+		return mk(ctx, customDef.id, customFields)
+	end
 
 	-- event connections
 	if (call.method == "Connect" or call.method == "Once")
@@ -305,6 +334,15 @@ local function convertLocal(ctx, stmt)
 		local name = names[1].name
 		local value = exprs[1]
 		local valueText = slice(ctx, value)
+
+		if value.k == "call" then
+			local customDef, customFields = convertCustomCall(ctx, value,
+				not value.method and g.pathOf(value.fn) or nil, "value")
+			if customDef then
+				customFields.out = name
+				return mk(ctx, customDef.id, customFields)
+			end
+		end
 
 		if isCallTo(value, "Instance.new") and #value.args == 1 then
 			local class = plainString(value.args[1])
