@@ -22,34 +22,82 @@ local c = {}
 --=============================================================================
 
 c.cats = {
-	{ id = "events", name = "Events", glyph = "E",
+	-- the ten fundamentals, one lesson each
+	{ id = "events", name = "Events", glyph = "E", tier = "core",
 	  blurb = "Code that waits for something to happen." },
-	{ id = "control", name = "Control", glyph = "C",
+	{ id = "control", name = "Control", glyph = "C", tier = "core",
 	  blurb = "Choose what runs, and how many times." },
-	{ id = "logic", name = "Logic", glyph = "?",
+	{ id = "logic", name = "Logic", glyph = "?", tier = "core",
 	  blurb = "Ask true-or-false questions about your world." },
-	{ id = "math", name = "Math", glyph = "N",
+	{ id = "math", name = "Math", glyph = "N", tier = "core",
 	  blurb = "Numbers, randomness and measurement." },
-	{ id = "text", name = "Text", glyph = "T",
+	{ id = "text", name = "Text", glyph = "T", tier = "core",
 	  blurb = "Build, cut and search strings." },
-	{ id = "vars", name = "Variables", glyph = "x",
+	{ id = "vars", name = "Variables", glyph = "x", tier = "core",
 	  blurb = "Name a value so you can use it later." },
-	{ id = "funcs", name = "Functions", glyph = "f",
+	{ id = "funcs", name = "Functions", glyph = "f", tier = "core",
 	  blurb = "Package steps up and reuse them." },
-	{ id = "inst", name = "Instances", glyph = "I",
+	{ id = "inst", name = "Instances", glyph = "I", tier = "core",
 	  blurb = "Make, change and delete objects in the game." },
-	{ id = "player", name = "Players", glyph = "P",
+	{ id = "player", name = "Players", glyph = "P", tier = "core",
 	  blurb = "Characters, humanoids and leaderboards." },
-	{ id = "data", name = "Data", glyph = "D",
+	{ id = "data", name = "Data", glyph = "D", tier = "core",
 	  blurb = "Lists and dictionaries that hold many values." },
-	{ id = "special", name = "Escape hatch", glyph = "*", extra = true,
+
+	-- subsystems
+	{ id = "ui", name = "Interface", glyph = "U", tier = "system",
+	  blurb = "Screens, text, buttons and everything a player looks at." },
+	{ id = "camera", name = "Camera & light", glyph = "K", tier = "system",
+	  blurb = "Where the view is, and how the world is lit." },
+	{ id = "sound", name = "Sound", glyph = "A", tier = "system",
+	  blurb = "Music, effects, volume and where a sound comes from." },
+	{ id = "save", name = "Saving", glyph = "S", tier = "system",
+	  blurb = "Keeping a player's progress between visits." },
+	{ id = "net", name = "Networking", glyph = "R", tier = "system",
+	  blurb = "The server and the client talking to each other." },
+	{ id = "shop", name = "Shop", glyph = "$", tier = "system",
+	  blurb = "Passes, products, badges and what a player owns." },
+	{ id = "place", name = "Places", glyph = "G", tier = "system",
+	  blurb = "Sending players to other places and servers." },
+	{ id = "phys", name = "Physics", glyph = "F", tier = "system",
+	  blurb = "Forces, joints, collisions and rays." },
+	{ id = "anim", name = "Animation", glyph = "M", tier = "system",
+	  blurb = "Playing animations and driving humanoid states." },
+	{ id = "npc", name = "NPCs", glyph = "W", tier = "system",
+	  blurb = "Characters the computer walks around for you." },
+	{ id = "terrain", name = "Terrain", glyph = "Y", tier = "system",
+	  blurb = "Ground, water and building the world in code." },
+	{ id = "algo", name = "Lists & sorting", glyph = "L", tier = "system",
+	  blurb = "Doing something useful to every item at once." },
+	{ id = "pattern", name = "Text patterns", glyph = "Q", tier = "system",
+	  blurb = "Finding and reshaping text that follows a shape." },
+	{ id = "vec", name = "Space & angles", glyph = "3", tier = "system",
+	  blurb = "Directions, rotations and the maths of moving things." },
+	{ id = "debug", name = "Debug & timing", glyph = "B", tier = "system",
+	  blurb = "Finding out what is happening, and how often." },
+
+	-- everything else
+	{ id = "custom", name = "My blocks", glyph = "+", tier = "special",
+	  blurb = "Blocks you made yourself, out of blocks or out of Luau." },
+	{ id = "special", name = "Escape hatch", glyph = "*", tier = "special",
 	  blurb = "Hand-written Luau and comments, for when blocks run out." },
 }
 
 c.catById = {}
 for index, cat in ipairs(c.cats) do
 	cat.index = index
+	cat.tier = cat.tier or "system"
+	cat.extra = cat.tier ~= "core"
 	c.catById[cat.id] = cat
+end
+
+-- The ten categories that have a lesson of their own.
+function c.coreCats()
+	local list = {}
+	for _, cat in ipairs(c.cats) do
+		if cat.tier == "core" then list[#list + 1] = cat end
+	end
+	return list
 end
 
 --=============================================================================
@@ -125,6 +173,30 @@ end
 c.defs = {}
 c.order = {}
 
+-- Value of a field on a block, falling back to the declared default.
+function c.fieldValue(def, block, key)
+	local raw = block.f and block.f[key]
+	if raw == nil or raw == "" then
+		local field = def.fields[key]
+		return field and field.default or ""
+	end
+	return raw
+end
+
+-- Fills a template with a block's field values.
+function c.fill(parts, def, block)
+	local out = {}
+	for _, part in ipairs(parts) do
+		if part.t == "text" then
+			out[#out + 1] = part.v
+		else
+			out[#out + 1] = c.fieldValue(def, block, part.k)
+		end
+	end
+	return table.concat(out)
+end
+
+
 local function asLines(value)
 	if value == nil then return nil end
 	if type(value) == "string" then return { value } end
@@ -148,6 +220,9 @@ local function D(def)
 	def.slots = def.slots or {}
 	def.bodyIndent = def.bodyIndent or 1
 	def.label = def.label or def.id
+	-- Subgroup inside the category, so a category of seventy blocks reads as
+	-- five short lists rather than one long one.
+	def.group = def.group or "General"
 
 	def.headTpl = {}
 	for index, line in ipairs(def.headLines) do
@@ -161,11 +236,24 @@ local function D(def)
 
 	-- Search text: label + templates + doc, lowercased once at load.
 	def.searchText = string.lower(table.concat({
-		def.label, def.id, def.cat,
+		def.label, def.id, def.cat, def.group,
 		table.concat(def.headLines, " "),
 		table.concat(def.codeLines, " "),
 		def.doc or "", def.tags or "",
 	}, " "))
+
+	-- The exact Luau this block writes, with its defaults filled in.  Shown in
+	-- every tooltip, so nothing about a block is hidden behind its wording.
+	local sample = {}
+	local blank = { f = {} }
+	for _, line in ipairs(def.codeLines) do
+		sample[#sample + 1] = (string.gsub(c.fill(parseTemplate(line), def, blank), "^\t", ""))
+	end
+	if #def.slots > 0 then sample[#sample + 1] = "\t..." end
+	for _, line in ipairs(def.codeTailLines or {}) do
+		sample[#sample + 1] = (string.gsub(c.fill(parseTemplate(line), def, blank), "^\t", ""))
+	end
+	def.sample = table.concat(sample, "\n")
 
 	c.defs[def.id] = def
 	c.order[#c.order + 1] = def
@@ -1210,6 +1298,24 @@ D{ id = "comment", cat = "special", label = "note",
 	tags = "comment note remark todo" }
 
 --=============================================================================
+-- the rest of the definitions
+--
+-- Split across files so no single one is unreadable.  Each returns a function
+-- taking the define helper, which is what keeps them from having to require
+-- this module back and make a cycle.
+--=============================================================================
+
+for _, load in ipairs({
+	require(script.Parent.s),
+	require(script.Parent.t),
+	require(script.Parent.u),
+	require(script.Parent.v),
+	require(script.Parent.w),
+}) do
+	load(D)
+end
+
+--=============================================================================
 -- lookups
 --=============================================================================
 
@@ -1227,29 +1333,6 @@ end
 
 function c.count()
 	return #c.order
-end
-
--- Value of a field on a block, falling back to the declared default.
-function c.fieldValue(def, block, key)
-	local raw = block.f and block.f[key]
-	if raw == nil or raw == "" then
-		local field = def.fields[key]
-		return field and field.default or ""
-	end
-	return raw
-end
-
--- Fills a template with a block's field values.
-function c.fill(parts, def, block)
-	local out = {}
-	for _, part in ipairs(parts) do
-		if part.t == "text" then
-			out[#out + 1] = part.v
-		else
-			out[#out + 1] = c.fieldValue(def, block, part.k)
-		end
-	end
-	return table.concat(out)
 end
 
 -- Every field key a definition actually uses, in the order they are read.
